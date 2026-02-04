@@ -408,9 +408,12 @@ app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screens
         await interest.save();
 
         res.json({ success: true, message: "Interest Request Submitted" });
-    } catch (e) { res.status(500).json({ success: false }); }
+    } catch (e) {
+    console.error("💥 ERROR IN /interest/submit-proof:", e.message);
+    return res.status(500).json({ success: false, error: e.message });
+ }
 });
-
+   
 // 4. Admin Verify Interest Payment (SECURE)
 app.post("/api/admin/payment/interest/verify", verifyAdmin, async (req, res) => {
     try {
