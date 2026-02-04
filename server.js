@@ -1,4 +1,3 @@
-require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -9,7 +8,22 @@ const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
+// ---------------- HARDCODED CONFIGURATION ----------------
+const PORT_NUM = 5000;
+const MONGO_URI_VAL = "mongodb+srv://sanjay:345@cluster0.rckg7dx.mongodb.net/kalyanashobha";
+const JWT_SECRET_VAL = "SANJAYSHARMA";
+
+// Cloudinary Credentials
+const CLOUDINARY_NAME = "dg6eufdce";
+const CLOUDINARY_KEY = "515743163455136";
+const CLOUDINARY_SECRET = "0C88e38P3JqkVrIdwExy26xHe18";
+
+// Email Credentials
+const EMAIL_USER_VAL = "adepusanjay444@gmail.com";
+const EMAIL_PASS_VAL = "lrnesuqvssiognej";
+
 // ---------------- MODELS ----------------
+// Ensure these files exist in your ./models/ folder
 const User = require('./models/User');
 const Agent = require('./models/Agent');
 const Vendor = require('./models/Vendor');
@@ -23,15 +37,15 @@ app.use(cors());
 app.use(express.json());
 
 // ---------------- DB CONNECTION ----------------
-mongoose.connect(process.env.MONGO_URI)
+mongoose.connect(MONGO_URI_VAL)
     .then(() => console.log("✅ MongoDB Connected"))
     .catch(err => console.error("❌ MongoDB Error:", err));
 
 // ---------------- CLOUDINARY CONFIG ----------------
 cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
+    cloud_name: CLOUDINARY_NAME,
+    api_key: CLOUDINARY_KEY,
+    api_secret: CLOUDINARY_SECRET
 });
 
 // Storage Configs
@@ -56,13 +70,13 @@ const uploadVendor = multer({ storage: vendorStorage });
 // ---------------- EMAIL HELPER ----------------
 const transporter = nodemailer.createTransport({
     service: "gmail",
-    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
+    auth: { user: EMAIL_USER_VAL, pass: EMAIL_PASS_VAL }
 });
 
 async function sendMail({ to, subject, html }) {
     try {
         await transporter.sendMail({
-            from: `"KalyanaShobha" <${process.env.EMAIL_USER}>`,
+            from: `"KalyanaShobha" <${EMAIL_USER_VAL}>`,
             to, subject,
             html: `<div style="font-family:sans-serif;padding:20px;border:1px solid #ddd;">${html}</div>`
         });
@@ -90,7 +104,7 @@ const verifyAdmin = (req, res, next) => {
     if (!token) return res.status(403).json({ success: false, message: "No token provided" });
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || "fallback_secret_key");
+        const decoded = jwt.verify(token, JWT_SECRET_VAL);
         if (decoded.role && (decoded.role === 'SuperAdmin' || decoded.role === 'Moderator')) {
             req.adminId = decoded.id;
             next();
@@ -108,7 +122,7 @@ const verifyUser = (req, res, next) => {
     if (!token) return res.status(403).json({ success: false, message: "No token provided" });
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || "fallback_secret_key");
+        const decoded = jwt.verify(token, JWT_SECRET_VAL);
         req.userId = decoded.id;
         next();
     } catch (err) {
@@ -148,7 +162,7 @@ app.post("/api/admin/auth/login", async (req, res) => {
         const isMatch = await bcrypt.compare(password, admin.password);
         if (!isMatch) return res.status(400).json({ success: false, message: "Invalid credentials" });
 
-        const token = jwt.sign({ id: admin._id, role: admin.role }, process.env.JWT_SECRET || "fallback_secret_key", { expiresIn: "1d" });
+        const token = jwt.sign({ id: admin._id, role: admin.role }, JWT_SECRET_VAL, { expiresIn: "1d" });
         res.json({ success: true, token, admin: { username: admin.username, email: admin.email, role: admin.role } });
     } catch (e) { res.status(500).json({ success: false, message: "Server Error" }); }
 });
@@ -177,7 +191,8 @@ const otpStore = {}; // Memory Store for OTPs
 app.post("/api/auth/register", uploadProfile.array("photos", 3), async (req, res) => {
     try {
         const data = req.body;
-        const photos = req.files.map(f => f.path);
+        // Check if files exist before mapping
+        const photos = req.files ? req.files.map(f => f.path) : [];
         const uniqueId = await generateUserId(data.state);
 
         // Hash Password
@@ -230,7 +245,7 @@ app.post("/api/auth/login-verify", async (req, res) => {
             delete otpStore[email]; // Clear OTP
             
             // Generate User Token
-            const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || "fallback_secret_key", { expiresIn: "7d" });
+            const token = jwt.sign({ id: user._id }, JWT_SECRET_VAL, { expiresIn: "7d" });
             
             res.json({ success: true, token, user });
         } else {
@@ -370,7 +385,7 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
             userId: req.userId, amount, utrNumber, screenshotUrl: req.file.path
         });
         await payment.save();
-        sendMail({ to: process.env.EMAIL_USER, subject: "Membership Payment", html: `User ${req.userId} paid ${amount}` });
+        sendMail({ to: EMAIL_USER_VAL, subject: "Membership Payment", html: `User ${req.userId} paid ${amount}` });
         res.json({ success: true, message: "Submitted" });
     } catch (e) { res.status(500).json({ success: false }); }
 });
@@ -482,7 +497,4 @@ app.post("/api/user/get-contact", verifyUser, async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port`))
-
-module.exports = app;
+app.listen(PORT_NUM, () => console.log(`🚀 Server running on port ${PORT_NUM}`));
