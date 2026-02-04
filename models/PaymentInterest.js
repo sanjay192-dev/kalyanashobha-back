@@ -10,7 +10,12 @@ const PaymentInterestSchema = new mongoose.Schema({
   screenshotUrl: { type: String, required: true },
 
   // Status
-  status: { type: String, enum: ['PendingVerification', 'Success', 'Rejected'], default: 'PendingVerification' },
+  status: { 
+    type: String, 
+    enum: ['PendingPaymentVerification', 'Success', 'Rejected'], 
+    default: 'PendingPaymentVerification' 
+  },
+
   adminNote: { type: String },
 
   date: { type: Date, default: Date.now }
