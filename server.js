@@ -206,30 +206,82 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 // ====================================================================
 const otpStore = {}; 
 
-app.post("/api/auth/register", uploadProfile.array("photos", 3), async (req, res) => {
+
+app.post("/api/auth/register", async (req, res) => {
     try {
         const data = req.body;
-        const photos = req.files.map(f => f.path);
+        
+        // Generate ID
         const uniqueId = await generateUserId(data.state);
 
         if (!data.password) return res.status(400).json({ success: false, message: "Password is required" });
+        
+        // Hash Password
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
 
-        const user = new User({ ...data, password: hashedPassword, uniqueId, photos });
+        // Create User with empty photos array
+        const user = new User({ 
+            ...data, 
+            password: hashedPassword, 
+            uniqueId, 
+            photos: [] // Initialize empty
+        });
+        
         await user.save();
 
         const emailContent = generateEmailTemplate(
             "Welcome to KalyanaShobha",
-            `<p>Thank you for registering with us. We are delighted to have you on board.</p>
+            `<p>Thank you for registering with us.</p>
              <p>Your unique Profile ID is: <strong>${uniqueId}</strong></p>
-             <p>Our team will review your profile shortly. Once approved, your profile will be visible to potential matches.</p>`
+             <p><strong>Next Step:</strong> Please log in to upload your profile photos to complete your profile.</p>`
         );
 
         sendMail({ to: user.email, subject: "Welcome to KalyanaShobha - Registration Successful", html: emailContent });
-        res.json({ success: true, user });
-    } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+        
+        res.json({ success: true, message: "Registration successful. Please login to upload photos.", user });
+    } catch (e) { 
+        console.error(e);
+        res.status(500).json({ success: false, message: e.message }); 
+    }
 });
+
+
+
+app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 3), async (req, res) => {
+    try {
+        // Check if files exist
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ success: false, message: "No photos uploaded" });
+        }
+
+        // Get paths from Cloudinary response
+        const newPhotos = req.files.map(f => f.path);
+
+        // Update the user found by ID (from the verified token)
+        // $push adds to existing, $set would replace all. 
+        // Using $push allows them to upload 1 by 1 or in batches.
+        const updatedUser = await User.findByIdAndUpdate(
+            req.userId,
+            { $push: { photos: { $each: newPhotos } } },
+            { new: true } // Return the updated document
+        );
+
+        res.json({ 
+            success: true, 
+            message: "Photos uploaded successfully", 
+            photos: updatedUser.photos 
+        });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ success: false, message: "Photo upload failed" });
+    }
+});
+
+
+
+
 
 app.post("/api/auth/login-init", async (req, res) => {
     try {
