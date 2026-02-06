@@ -10,6 +10,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 // ---------------- MODELS ----------------
+// Ensure these files exist in your 'models' folder
 const User = require('./models/User');
 const Agent = require('./models/Agent');
 const Vendor = require('./models/Vendor');
@@ -59,7 +60,6 @@ const transporter = nodemailer.createTransport({
     auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
 });
 
-// Professional HTML Template Generator
 const generateEmailTemplate = (title, bodyContent) => {
     return `
     <!DOCTYPE html>
@@ -73,36 +73,27 @@ const generateEmailTemplate = (title, bodyContent) => {
             .header h1 { margin: 0; font-size: 24px; letter-spacing: 1px; }
             .content { padding: 30px; color: #333333; line-height: 1.6; }
             .footer { background-color: #f4f4f4; color: #777777; padding: 15px; text-align: center; font-size: 12px; border-top: 1px solid #dddddd; }
-            .button { display: inline-block; padding: 10px 20px; background-color: #2c3e50; color: #ffffff; text-decoration: none; border-radius: 4px; margin-top: 15px; }
         </style>
     </head>
     <body>
         <div class="container">
-            <div class="header">
-                <h1>KalyanaShobha</h1>
-            </div>
+            <div class="header"><h1>KalyanaShobha</h1></div>
             <div class="content">
-                <h2 style="color: #2c3e50; font-size: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px;">${title}</h2>
+                <h2 style="color: #2c3e50; border-bottom: 2px solid #eee;">${title}</h2>
                 ${bodyContent}
                 <p style="margin-top: 30px;">Sincerely,<br>The KalyanaShobha Team</p>
             </div>
-            <div class="footer">
-                <p>This is an automated message. Please do not reply directly to this email.</p>
-                <p>&copy; ${new Date().getFullYear()} KalyanaShobha Matrimony. All rights reserved.</p>
-            </div>
+            <div class="footer"><p>&copy; ${new Date().getFullYear()} KalyanaShobha. All rights reserved.</p></div>
         </div>
     </body>
-    </html>
-    `;
+    </html>`;
 };
 
 async function sendMail({ to, subject, html }) {
     try {
         await transporter.sendMail({
-            from: `"KalyanaShobha Notifications" <${process.env.EMAIL_USER}>`,
-            to, 
-            subject,
-            html // The HTML is already formatted by generateEmailTemplate before being passed here
+            from: `"KalyanaShobha" <${process.env.EMAIL_USER}>`,
+            to, subject, html
         });
         return true;
     } catch (err) {
@@ -116,15 +107,19 @@ async function generateUserId(state) {
     let code = "IN";
     if (state && state.toLowerCase() === "telangana") code = "TG";
     if (state && state.toLowerCase() === "maharashtra") code = "MAR";
-    const count = await User.countDocuments({ state });
+    
+    // Using regex to match state case-insensitively for accurate count
+    const count = await User.countDocuments({ state: { $regex: new RegExp(`^${state}$`, 'i') } });
     return `${code}-${String(count + 1).padStart(5, '0')}`;
 }
 
 // ---------------- MIDDLEWARE: SECURITY ----------------
-
 const verifyAdmin = (req, res, next) => {
-    const token = req.headers['authorization'];
-    if (!token) return res.status(403).json({ success: false, message: "No token provided" });
+    const authHeader = req.headers['authorization'];
+    if (!authHeader) return res.status(403).json({ success: false, message: "No token provided" });
+
+    // Handle "Bearer <token>" format
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7, authHeader.length) : authHeader;
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET || "fallback_secret_key");
@@ -140,8 +135,11 @@ const verifyAdmin = (req, res, next) => {
 };
 
 const verifyUser = (req, res, next) => {
-    const token = req.headers['authorization'];
-    if (!token) return res.status(403).json({ success: false, message: "No token provided" });
+    const authHeader = req.headers['authorization'];
+    if (!authHeader) return res.status(403).json({ success: false, message: "No token provided" });
+
+    // Handle "Bearer <token>" format
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7, authHeader.length) : authHeader;
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET || "fallback_secret_key");
@@ -187,51 +185,35 @@ app.post("/api/admin/auth/login", async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, message: "Server Error" }); }
 });
 
-app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
-    try {
-        const { oldPassword, newPassword } = req.body;
-        const admin = await Admin.findById(req.adminId);
-        const isMatch = await bcrypt.compare(oldPassword, admin.password);
-        if (!isMatch) return res.status(400).json({ success: false, message: "Old password incorrect" });
-
-        const salt = await bcrypt.genSalt(10);
-        admin.password = await bcrypt.hash(newPassword, salt);
-        await admin.save();
-        res.json({ success: true, message: "Password updated" });
-    } catch (e) { res.status(500).json({ success: false }); }
-});
-
 // ====================================================================
 // B. USER AUTH (Register & Secure Login with OTP)
 // ====================================================================
-const otpStore = {}; 
+const otpStore = {}; // For Login
+const registerOtpStore = {}; // For Registration
 
-const registerOtpStore = {};
-
+// 1. REGISTER INIT: Validate Email, store data, send OTP
 app.post("/api/auth/register-init", async (req, res) => {
     try {
         const data = req.body;
 
-        // 1. Check if user exists already
+        // Check if user exists already
         const exists = await User.findOne({ email: data.email });
         if (exists) {
             return res.status(400).json({ success: false, message: "Email already registered" });
         }
 
-        // 2. Generate OTP
         const otp = Math.floor(100000 + Math.random() * 900000);
 
-        // 3. Save registration data temporarily
+        // Store data temporarily
         registerOtpStore[data.email] = {
             otp,
             data,
             expiresAt: Date.now() + 5 * 60 * 1000
         };
 
-        // Auto delete OTP after expiry
+        // Auto delete after 5 mins
         setTimeout(() => delete registerOtpStore[data.email], 300000);
 
-        // 4. Send OTP email
         const emailContent = generateEmailTemplate(
             "Complete Your Registration",
             `<p>Use the OTP below to complete your registration:</p>
@@ -253,95 +235,58 @@ app.post("/api/auth/register-init", async (req, res) => {
     }
 });
 
-
-
+// 2. REGISTER VERIFY: Validate OTP, create User
 app.post("/api/auth/register-verify", async (req, res) => {
     try {
         const { email, otp } = req.body;
 
         const session = registerOtpStore[email];
-        if (!session)
-            return res.status(400).json({ success: false, message: "OTP expired or not found" });
+        if (!session) return res.status(400).json({ success: false, message: "OTP expired or not found" });
 
-        if (parseInt(otp) !== session.otp)
-            return res.status(400).json({ success: false, message: "Invalid OTP" });
+        if (parseInt(otp) !== session.otp) return res.status(400).json({ success: false, message: "Invalid OTP" });
 
         const userData = session.data;
+        delete registerOtpStore[email]; // Cleanup
 
-        // Remove OTP storage
-        delete registerOtpStore[email];
-
-        // Create uniqueId
+        // Generate ID and Hash Password
         const uniqueId = await generateUserId(userData.state);
-
-        // Hash password
         const hashedPassword = await bcrypt.hash(userData.password, 10);
 
-        // Create user
+        // Create User
         const newUser = new User({
             ...userData,
             password: hashedPassword,
             uniqueId,
+            isVerified: true, // Mark as verified
             photos: []
         });
 
         await newUser.save();
 
-        // Send welcome mail
         const emailContent = generateEmailTemplate(
             "Welcome to KalyanaShobha",
             `<p>Your registration is successful.</p>
              <p>Your Profile ID: <strong>${uniqueId}</strong></p>`
         );
 
-        sendMail({
-            to: email,
-            subject: "Registration Successful",
-            html: emailContent
-        });
+        sendMail({ to: email, subject: "Registration Successful", html: emailContent });
 
         res.json({ success: true, message: "Account created successfully. Please login.", user: newUser });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, message: "Server Error" });
+        console.error("REGISTRATION ERROR:", err);
+        res.status(500).json({ success: false, message: err.message || "Registration Failed" });
     }
 });
 
-
-app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 3), async (req, res) => {
-    try {
-        if (!req.files || req.files.length === 0) {
-            return res.status(400).json({ success: false, message: "No photos uploaded" });
-        }
-
-        const user = await User.findById(req.userId);
-        if (!user) return res.status(404).json({ success: false, message: "User not found" });
-
-        const uploadedPhotos = req.files.map(f => f.path);
-
-        // Append or Replace Photos (You choose — here replacing)
-        user.photos = uploadedPhotos;
-
-        await user.save();
-
-        res.json({
-            success: true,
-            message: "Photos uploaded successfully",
-            photos: user.photos
-        });
-
-    } catch (err) {
-        console.error("UPLOAD ERROR:", err);
-        res.status(500).json({ success: false, message: err.message });
-    }
-});
-
+// 3. LOGIN INIT
 app.post("/api/auth/login-init", async (req, res) => {
     try {
         const { email, password } = req.body;
-        const user = await User.findOne({ email, isActive: true }); 
-        if (!user) return res.status(404).json({ success: false, message: "User not found or blocked" });
+        const user = await User.findOne({ email }); 
+        
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+        if (user.isActive === false) return res.status(403).json({ success: false, message: "Account blocked by Admin" });
 
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(400).json({ success: false, message: "Invalid credentials" });
@@ -352,10 +297,7 @@ app.post("/api/auth/login-init", async (req, res) => {
 
         const emailContent = generateEmailTemplate(
             "Login Authentication",
-            `<p>You have requested to log in to your account.</p>
-             <p>Your One-Time Password (OTP) is:</p>
-             <h2 style="color: #2c3e50; letter-spacing: 5px;">${otp}</h2>
-             <p>This code is valid for 5 minutes. Do not share this code with anyone.</p>`
+            `<p>Your Login OTP is:</p><h2 style="letter-spacing: 5px;">${otp}</h2>`
         );
 
         await sendMail({ to: email, subject: "Your Login OTP", html: emailContent });
@@ -363,6 +305,7 @@ app.post("/api/auth/login-init", async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+// 4. LOGIN VERIFY
 app.post("/api/auth/login-verify", async (req, res) => {
     try {
         const { email, otp } = req.body;
@@ -377,6 +320,22 @@ app.post("/api/auth/login-verify", async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
+// 5. UPLOAD PHOTOS
+app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 3), async (req, res) => {
+    try {
+        if (!req.files || req.files.length === 0) return res.status(400).json({ success: false, message: "No photos uploaded" });
+
+        const user = await User.findById(req.userId);
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        const uploadedPhotos = req.files.map(f => f.path);
+        user.photos = uploadedPhotos; // Replacing photos
+        await user.save();
+
+        res.json({ success: true, message: "Photos uploaded successfully", photos: user.photos });
+    } catch (err) { res.status(500).json({ success: false, message: err.message }); }
+});
+
 // ====================================================================
 // C. SEARCH (Public)
 // ====================================================================
@@ -384,8 +343,7 @@ app.post("/api/users/search", async (req, res) => {
     try {
         const { 
             gender, minAge, maxAge, minHeight, maxHeight, 
-            religion, caste, education, jobRole, 
-            state, city, diet 
+            religion, caste, education, state, city, diet 
         } = req.body;
 
         let query = { isApproved: true, isActive: true };
@@ -398,12 +356,16 @@ app.post("/api/users/search", async (req, res) => {
         if (city) query.city = city;
         if (diet) query.diet = diet;
 
+        // AGE CALCULATION LOGIC
         if (minAge || maxAge) {
             query.dob = {};
             const today = new Date();
+            // To be at least X years old, you must be born BEFORE today - X years
             if (minAge) query.dob.$lte = new Date(today.getFullYear() - minAge, today.getMonth(), today.getDate());
+            // To be at most Y years old, you must be born AFTER today - Y years
             if (maxAge) query.dob.$gte = new Date(today.getFullYear() - maxAge, today.getMonth(), today.getDate());
         }
+        
         if (minHeight || maxHeight) {
             query.height = {};
             if (minHeight) query.height.$gte = parseFloat(minHeight);
@@ -449,8 +411,7 @@ app.post("/api/admin/users/status", verifyAdmin, async (req, res) => {
             user.isApproved = true; user.rejectionReason = null;
             const emailContent = generateEmailTemplate(
                 "Profile Approved",
-                `<p>We are pleased to inform you that your profile has been successfully verified and approved by our administration team.</p>
-                 <p>Your profile is now visible to other members. Good luck with your search.</p>`
+                `<p>We are pleased to inform you that your profile has been successfully verified.</p>`
             );
             await sendMail({ to: user.email, subject: "Profile Status: Approved", html: emailContent });
 
@@ -458,11 +419,9 @@ app.post("/api/admin/users/status", verifyAdmin, async (req, res) => {
             user.isApproved = false; user.rejectionReason = reason;
             const emailContent = generateEmailTemplate(
                 "Profile Update Required",
-                `<p>We reviewed your profile but could not approve it at this time.</p>
-                 <p><strong>Reason:</strong> ${reason}</p>
-                 <p>Please log in and update your profile information or photos accordingly to be reconsidered.</p>`
+                `<p>We reviewed your profile but could not approve it.</p><p>Reason: ${reason}</p>`
             );
-            await sendMail({ to: user.email, subject: "Action Required: Profile Update", html: emailContent });
+            await sendMail({ to: user.email, subject: "Action Required", html: emailContent });
 
         } else if (action === 'block') { user.isActive = false; }
           else if (action === 'unblock') { user.isActive = true; }
@@ -472,6 +431,7 @@ app.post("/api/admin/users/status", verifyAdmin, async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
+// ---------------- AGENTS & VENDORS ----------------
 app.post("/api/admin/agents", verifyAdmin, async (req, res) => {
     try {
         const agent = new Agent(req.body);
@@ -479,13 +439,13 @@ app.post("/api/admin/agents", verifyAdmin, async (req, res) => {
         res.json({ success: true, agent });
     } catch (e) { res.status(500).json({ success: false }); }
 });
-app.delete("/api/admin/agents/:id", verifyAdmin, async (req, res) => {
-    await Agent.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
-});
 app.get("/api/admin/agents", verifyAdmin, async (req, res) => {
     const agents = await Agent.find();
     res.json({ success: true, agents });
+});
+app.delete("/api/admin/agents/:id", verifyAdmin, async (req, res) => {
+    await Agent.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
 });
 
 app.post("/api/admin/vendors", verifyAdmin, uploadVendor.array("images", 3), async (req, res) => {
@@ -496,13 +456,13 @@ app.post("/api/admin/vendors", verifyAdmin, uploadVendor.array("images", 3), asy
         res.json({ success: true, vendor });
     } catch (e) { res.status(500).json({ success: false }); }
 });
-app.delete("/api/admin/vendors/:id", verifyAdmin, async (req, res) => {
-    await Vendor.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
-});
 app.get("/api/admin/vendors", verifyAdmin, async (req, res) => {
     const vendors = await Vendor.find();
     res.json({ success: true, vendors });
+});
+app.delete("/api/admin/vendors/:id", verifyAdmin, async (req, res) => {
+    await Vendor.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
 });
 
 // ====================================================================
@@ -522,14 +482,9 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
 
         const emailContent = generateEmailTemplate(
             "Payment Received",
-            `<p>We have received your payment submission of <strong>Rs. ${amount}</strong>.</p>
-             <p>Our team will verify the transaction details (UTR: ${utrNumber}) within 24 hours.</p>
-             <p>You will receive a confirmation email once your membership is activated.</p>`
+            `<p>We have received your payment submission of <strong>Rs. ${amount}</strong> (UTR: ${utrNumber}).</p>`
         );
         sendMail({ to: user.email, subject: "Payment Submission Received", html: emailContent });
-
-        // Admin Alert (Simplified for internal)
-        sendMail({ to: process.env.EMAIL_USER, subject: "New Membership Payment", html: `<p>User ${req.userId} paid ${amount}. Please verify.</p>` });
 
         res.json({ success: true, message: "Submitted" });
     } catch (e) { res.status(500).json({ success: false }); }
@@ -545,119 +500,55 @@ app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res)
         if (action === "approve") {
             payment.status = "Success"; user.isPaidMember = true;
             await payment.save(); await user.save();
-
-            const emailContent = generateEmailTemplate(
-                "Membership Activated",
-                `<p>We verified your payment successfully.</p>
-                 <p>Your Paid Membership is now <strong>Active</strong>. You can now access premium features.</p>`
-            );
-            sendMail({ to: user.email, subject: "Membership Activated", html: emailContent });
-
+            await sendMail({ to: user.email, subject: "Membership Activated", html: generateEmailTemplate("Membership Activated", "<p>Your Paid Membership is now Active.</p>") });
         } else {
             payment.status = "Rejected"; await payment.save();
-            const emailContent = generateEmailTemplate(
-                "Payment Verification Failed",
-                `<p>We could not verify your recent payment transaction.</p>
-                 <p>Please check if the UTR number or screenshot provided was correct and try submitting again.</p>`
-            );
-            sendMail({ to: user.email, subject: "Action Required: Payment Issue", html: emailContent });
+            await sendMail({ to: user.email, subject: "Payment Failed", html: generateEmailTemplate("Payment Failed", "<p>We could not verify your payment.</p>") });
         }
         res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
 
-// 3. Submit Interest (User) - Both User and Admin receive emails
+// 3. Submit Interest (User)
 app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screenshot"), async (req, res) => {
     try {
         const { receiverId, amount, utrNumber } = req.body;
-
-        // 1. Fetch user details for the email
         const user = await User.findById(req.userId);
-        if (!user) return res.status(404).json({ success: false, message: "User not found" });
-
-        // 2. Save Payment Record
+        
         const payment = new PaymentInterest({
-            senderId: req.userId, 
-            receiverId, 
-            amount, 
-            utrNumber, 
-            screenshotUrl: req.file.path
+            senderId: req.userId, receiverId, amount, utrNumber, screenshotUrl: req.file.path
         });
         await payment.save();
 
-        // 3. Create Interest Record
         const interest = new Interest({
-            senderId: req.userId, 
-            receiverId, 
-            paymentId: payment._id, 
-            status: "PendingPaymentVerification"
+            senderId: req.userId, receiverId, paymentId: payment._id, status: "PendingPaymentVerification"
         });
         await interest.save();
 
-        // 4. Send Email to SENDER (Acknowledgment)
-        const userEmailContent = generateEmailTemplate(
-            "Interest Request Received",
-            `<p>Dear ${user.username},</p>
-             <p>We have received your interest request and the payment proof of <strong>Rs. ${amount}</strong>.</p>
-             <p>Our administration team is currently verifying the transaction details (UTR: ${utrNumber}). Once verified, your interest will be forwarded to the recipient.</p>
-             <p>Status: Payment Verification Pending</p>`
-        );
         sendMail({ 
             to: user.email, 
-            subject: "Notification: Interest Request Submitted", 
-            html: userEmailContent 
+            subject: "Interest Submitted", 
+            html: generateEmailTemplate("Interest Received", `<p>We received your interest request for user ID: ${receiverId}.</p>`) 
         });
 
-        // 5. Send Email to ADMIN (Action Required)
-        const adminEmailContent = generateEmailTemplate(
-            "Action Required: New Interest Payment",
-            `<p>A new interest payment has been submitted for verification.</p>
-             <p><strong>Sender ID:</strong> ${user.uniqueId}<br>
-                <strong>UTR Number:</strong> ${utrNumber}<br>
-                <strong>Amount:</strong> Rs. ${amount}</p>
-             <p>Please log in to the Admin Dashboard to verify the screenshot and approve the request.</p>`
-        );
-        sendMail({ 
-            to: process.env.EMAIL_USER, 
-            subject: "Admin Alert: New Interest Verification Required", 
-            html: adminEmailContent 
-        });
-
-        res.json({ success: true, message: "Interest Request and Payment Proof Submitted" });
-
-    } catch (e) {
-        console.error("Interest Submission Error:", e.message);
-        return res.status(500).json({ success: false, error: e.message });
-    }
+        res.json({ success: true, message: "Interest Request Submitted" });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-// 4. Admin Verify Interest Payment
+// 4. Admin Verify Interest
 app.post("/api/admin/payment/interest/verify", verifyAdmin, async (req, res) => {
     try {
         const { paymentId, action } = req.body;
-        const payment = await PaymentInterest.findById(paymentId).populate('senderId'); // Populated for Email
+        const payment = await PaymentInterest.findById(paymentId).populate('senderId');
         const interest = await Interest.findOne({ paymentId });
 
         if (action === "approve") {
             payment.status = "Success"; interest.status = "PendingAdmin";
-
-            const emailContent = generateEmailTemplate(
-                "Payment Verified",
-                `<p>Your payment for the interest request has been verified.</p>
-                 <p>Your request is now under final content review by our team.</p>`
-            );
-            await sendMail({ to: payment.senderId.email, subject: "Payment Successful", html: emailContent });
-
+            await sendMail({ to: payment.senderId.email, subject: "Payment Verified", html: generateEmailTemplate("Payment Verified", "<p>Your payment is verified. Request under review.</p>") });
         } else {
             payment.status = "Rejected"; interest.status = "Rejected";
-
-            const emailContent = generateEmailTemplate(
-                "Payment Verification Failed",
-                `<p>We were unable to verify your payment for the interest request.</p>
-                 <p>Please ensure the transaction details are correct and submit again.</p>`
-            );
-            await sendMail({ to: payment.senderId.email, subject: "Payment Verification Issue", html: emailContent });
+            await sendMail({ to: payment.senderId.email, subject: "Payment Rejected", html: generateEmailTemplate("Payment Rejected", "<p>Invalid transaction details.</p>") });
         }
         await payment.save(); await interest.save();
         res.json({ success: true });
@@ -668,42 +559,19 @@ app.post("/api/admin/payment/interest/verify", verifyAdmin, async (req, res) => 
 app.post("/api/admin/interest/approve-content", verifyAdmin, async (req, res) => {
     try {
         const { interestId, action } = req.body;
-        // Populate both to send emails
         const interest = await Interest.findById(interestId).populate('receiverId').populate('senderId');
 
         if (action === "approve") {
             interest.status = "PendingUser";
-
-            // Mail to Sender
-            const senderContent = generateEmailTemplate(
-                "Request Forwarded",
-                `<p>Your interest request has been approved by our team and forwarded to the profile of <strong>${interest.receiverId.username}</strong>.</p>
-                 <p>You will be notified once they respond.</p>`
-            );
-            sendMail({ to: interest.senderId.email, subject: "Request Forwarded", html: senderContent });
-
-            // Mail to Receiver
-            const receiverContent = generateEmailTemplate(
-                "New Interest Received",
-                `<p>You have received a new interest from <strong>${interest.senderId.username}</strong>.</p>
-                 <p>Please log in to your dashboard to view their profile and accept or decline this request.</p>`
-            );
-            sendMail({ to: interest.receiverId.email, subject: "New Interest Notification", html: receiverContent });
-
+            sendMail({ to: interest.senderId.email, subject: "Request Forwarded", html: generateEmailTemplate("Request Forwarded", `<p>Forwarded to ${interest.receiverId.username}.</p>`) });
+            sendMail({ to: interest.receiverId.email, subject: "New Interest", html: generateEmailTemplate("New Interest", `<p>You have a new interest from ${interest.senderId.username}.</p>`) });
         } else {
             interest.status = "Rejected";
-            const senderContent = generateEmailTemplate(
-                "Request Status",
-                `<p>Your interest request could not be forwarded as it did not meet our content guidelines.</p>`
-            );
-            sendMail({ to: interest.senderId.email, subject: "Interest Request Update", html: senderContent });
+            sendMail({ to: interest.senderId.email, subject: "Request Rejected", html: generateEmailTemplate("Request Rejected", "<p>Content did not meet guidelines.</p>") });
         }
         await interest.save();
         res.json({ success: true });
-    } catch (e) {
-        console.error(e);
-        res.status(500).json({ success: false });
-    }
+    } catch (e) { res.status(500).json({ success: false }); }
 });
 
 // 6. User Responds to Interest
@@ -712,37 +580,18 @@ app.post("/api/user/interest/respond", verifyUser, async (req, res) => {
         const { interestId, action } = req.body;
         const interest = await Interest.findById(interestId).populate('senderId').populate('receiverId');
 
-        // Security check
-        if (interest.receiverId._id.toString() !== req.userId) {
-            return res.status(403).json({ success: false, message: "Not your request" });
-        }
+        if (interest.receiverId._id.toString() !== req.userId) return res.status(403).json({ message: "Unauthorized" });
 
         if (action === "accept") {
             interest.status = "Accepted";
-
-            const senderContent = generateEmailTemplate(
-                "Interest Accepted",
-                `<p>Good news! <strong>${interest.receiverId.username}</strong> has accepted your interest request.</p>
-                 <p>You may now view their contact details on your dashboard.</p>`
-            );
-            sendMail({ to: interest.senderId.email, subject: "Interest Request Accepted", html: senderContent });
-
+            sendMail({ to: interest.senderId.email, subject: "Accepted!", html: generateEmailTemplate("Accepted", `<p>${interest.receiverId.username} accepted your request.</p>`) });
         } else {
             interest.status = "Declined";
-
-            const senderContent = generateEmailTemplate(
-                "Interest Update",
-                `<p><strong>${interest.receiverId.username}</strong> has declined your interest request.</p>
-                 <p>We encourage you to continue searching for other suitable matches.</p>`
-            );
-            sendMail({ to: interest.senderId.email, subject: "Interest Request Update", html: senderContent });
+            sendMail({ to: interest.senderId.email, subject: "Declined", html: generateEmailTemplate("Declined", `<p>${interest.receiverId.username} declined your request.</p>`) });
         }
         await interest.save();
         res.json({ success: true });
-    } catch (e) {
-        console.error(e);
-        res.status(500).json({ success: false });
-    }
+    } catch (e) { res.status(500).json({ success: false }); }
 });
 
 // 7. Get Contact Details
@@ -760,13 +609,10 @@ app.post("/api/user/get-contact", verifyUser, async (req, res) => {
             const target = await User.findById(targetUserId).select("mobileNumber email");
             res.json({ success: true, contact: target });
         } else {
-            res.status(403).json({ success: false, message: "Locked" });
+            res.status(403).json({ success: false, message: "Contact Locked. Interest must be accepted first." });
         }
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
-
-
