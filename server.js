@@ -206,43 +206,107 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 // ====================================================================
 const otpStore = {}; 
 
-app.post("/api/auth/register", async (req, res) => {
+const registerOtpStore = {};
+
+app.post("/api/auth/register-init", async (req, res) => {
     try {
         const data = req.body;
-        const uniqueId = await generateUserId(data.state);
 
-        if (!data.password)
-            return res.status(400).json({ success: false, message: "Password is required" });
+        // 1. Check if user exists already
+        const exists = await User.findOne({ email: data.email });
+        if (exists) {
+            return res.status(400).json({ success: false, message: "Email already registered" });
+        }
 
-        const hashedPassword = await bcrypt.hash(data.password, 10);
+        // 2. Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000);
 
-        const user = new User({ 
-            ...data,
-            password: hashedPassword,
-            uniqueId,
-            photos: []   // <-- EMPTY NOW
-        });
+        // 3. Save registration data temporarily
+        registerOtpStore[data.email] = {
+            otp,
+            data,
+            expiresAt: Date.now() + 5 * 60 * 1000
+        };
 
-        await user.save();
+        // Auto delete OTP after expiry
+        setTimeout(() => delete registerOtpStore[data.email], 300000);
 
+        // 4. Send OTP email
         const emailContent = generateEmailTemplate(
-            "Welcome to KalyanaShobha",
-            `<p>Thank you for registering with us.</p>
-             <p>Your unique Profile ID: <strong>${uniqueId}</strong></p>`
+            "Complete Your Registration",
+            `<p>Use the OTP below to complete your registration:</p>
+             <h2 style="letter-spacing:5px;">${otp}</h2>
+             <p>This OTP is valid for 5 minutes.</p>`
         );
 
-        sendMail({
-            to: user.email,
-            subject: "Welcome to KalyanaShobha - Registration Successful",
+        await sendMail({
+            to: data.email,
+            subject: "Your Registration OTP",
             html: emailContent
         });
 
-        res.json({ success: true, user });
+        res.json({ success: true, message: "OTP sent to your Gmail" });
+
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        console.error(err);
+        res.status(500).json({ success: false, message: "Server Error" });
     }
 });
 
+
+
+app.post("/api/auth/register-verify", async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+
+        const session = registerOtpStore[email];
+        if (!session)
+            return res.status(400).json({ success: false, message: "OTP expired or not found" });
+
+        if (parseInt(otp) !== session.otp)
+            return res.status(400).json({ success: false, message: "Invalid OTP" });
+
+        const userData = session.data;
+
+        // Remove OTP storage
+        delete registerOtpStore[email];
+
+        // Create uniqueId
+        const uniqueId = await generateUserId(userData.state);
+
+        // Hash password
+        const hashedPassword = await bcrypt.hash(userData.password, 10);
+
+        // Create user
+        const newUser = new User({
+            ...userData,
+            password: hashedPassword,
+            uniqueId,
+            photos: []
+        });
+
+        await newUser.save();
+
+        // Send welcome mail
+        const emailContent = generateEmailTemplate(
+            "Welcome to KalyanaShobha",
+            `<p>Your registration is successful.</p>
+             <p>Your Profile ID: <strong>${uniqueId}</strong></p>`
+        );
+
+        sendMail({
+            to: email,
+            subject: "Registration Successful",
+            html: emailContent
+        });
+
+        res.json({ success: true, message: "Account created successfully. Please login.", user: newUser });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
 
 
 app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 3), async (req, res) => {
