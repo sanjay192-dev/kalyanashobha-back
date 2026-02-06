@@ -1,3 +1,4 @@
+
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -206,25 +207,17 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 // ====================================================================
 const otpStore = {}; 
 
-
-// ====================================================================
-// MODIFIED: REGISTER (Data Only - Fast)
-// ====================================================================
-// Removed: uploadProfile.array("photos", 3) middleware
-app.post("/api/auth/register", async (req, res) => {
+app.post("/api/auth/register", uploadProfile.array("photos", 3), async (req, res) => {
     try {
         const data = req.body;
-        
-        // Removed: const photos = req.files.map(f => f.path);
-        
+        const photos = req.files.map(f => f.path);
         const uniqueId = await generateUserId(data.state);
 
         if (!data.password) return res.status(400).json({ success: false, message: "Password is required" });
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
 
-        // Set photos to empty array [] initially
-        const user = new User({ ...data, password: hashedPassword, uniqueId, photos: [] });
+        const user = new User({ ...data, password: hashedPassword, uniqueId, photos });
         await user.save();
 
         const emailContent = generateEmailTemplate(
@@ -235,51 +228,9 @@ app.post("/api/auth/register", async (req, res) => {
         );
 
         sendMail({ to: user.email, subject: "Welcome to KalyanaShobha - Registration Successful", html: emailContent });
-        
-        res.json({ success: true, user, message: "Registration successful. Please login to upload photos." });
+        res.json({ success: true, user });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
-
-
-// ====================================================================
-// NEW: UPLOAD PHOTOS (Separate Step)
-// ====================================================================
-// This route is called AFTER the user logs in
-app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 3), async (req, res) => {
-    try {
-        if (!req.files || req.files.length === 0) {
-            return res.status(400).json({ success: false, message: "No photos uploaded" });
-        }
-
-        const photoUrls = req.files.map(f => f.path);
-
-        // Update the logged-in user's photos
-        // Using $set to overwrite any existing photos, or $push to add to them.
-        // Here we use $set assuming this is the profile setup phase.
-        const user = await User.findByIdAndUpdate(
-            req.userId,
-            { $set: { photos: photoUrls } },
-            { new: true } // Return the updated user
-        ).select("-password");
-
-        if (!user) {
-            return res.status(404).json({ success: false, message: "User not found" });
-        }
-
-        res.json({ 
-            success: true, 
-            message: "Photos uploaded successfully", 
-            photos: user.photos 
-        });
-        
-    } catch (e) {
-        console.error("Photo Upload Error:", e);
-        res.status(500).json({ success: false, message: e.message });
-    }
-});
-
-
-
 
 app.post("/api/auth/login-init", async (req, res) => {
     try {
@@ -407,7 +358,7 @@ app.post("/api/admin/users/status", verifyAdmin, async (req, res) => {
                  <p>Please log in and update your profile information or photos accordingly to be reconsidered.</p>`
             );
             await sendMail({ to: user.email, subject: "Action Required: Profile Update", html: emailContent });
-            
+
         } else if (action === 'block') { user.isActive = false; }
           else if (action === 'unblock') { user.isActive = true; }
 
@@ -474,7 +425,7 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
 
         // Admin Alert (Simplified for internal)
         sendMail({ to: process.env.EMAIL_USER, subject: "New Membership Payment", html: `<p>User ${req.userId} paid ${amount}. Please verify.</p>` });
-        
+
         res.json({ success: true, message: "Submitted" });
     } catch (e) { res.status(500).json({ success: false }); }
 });
@@ -515,7 +466,7 @@ app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res)
 app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screenshot"), async (req, res) => {
     try {
         const { receiverId, amount, utrNumber } = req.body;
-        
+
         // 1. Fetch user details for the email
         const user = await User.findById(req.userId);
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
@@ -585,7 +536,7 @@ app.post("/api/admin/payment/interest/verify", verifyAdmin, async (req, res) => 
 
         if (action === "approve") {
             payment.status = "Success"; interest.status = "PendingAdmin";
-            
+
             const emailContent = generateEmailTemplate(
                 "Payment Verified",
                 `<p>Your payment for the interest request has been verified.</p>
@@ -617,7 +568,7 @@ app.post("/api/admin/interest/approve-content", verifyAdmin, async (req, res) =>
 
         if (action === "approve") {
             interest.status = "PendingUser";
-            
+
             // Mail to Sender
             const senderContent = generateEmailTemplate(
                 "Request Forwarded",
@@ -663,7 +614,7 @@ app.post("/api/user/interest/respond", verifyUser, async (req, res) => {
 
         if (action === "accept") {
             interest.status = "Accepted";
-            
+
             const senderContent = generateEmailTemplate(
                 "Interest Accepted",
                 `<p>Good news! <strong>${interest.receiverId.username}</strong> has accepted your interest request.</p>
