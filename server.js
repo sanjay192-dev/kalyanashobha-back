@@ -1,3 +1,5 @@
+
+
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -23,18 +25,9 @@ app.use(cors());
 app.use(express.json());
 
 // ---------------- DB CONNECTION ----------------
-mongoose.set("strictQuery", true);
-mongoose.set("bufferCommands", false);
-
-mongoose.connect(process.env.MONGO_URI, {
-    serverSelectionTimeoutMS: 20000,
-    socketTimeoutMS: 45000
-})
-.then(() => console.log("MongoDB Connected"))
-.catch(err => console.error("MongoDB Error:", err.message));
-
-
-
+mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log("MongoDB Connected"))
+    .catch(err => console.error("MongoDB Error:", err));
 
 // ---------------- CLOUDINARY CONFIG ----------------
 cloudinary.config({
@@ -215,59 +208,30 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 // ====================================================================
 const otpStore = {}; 
 
-// ----------- REGISTER WITHOUT PHOTOS ------------
-app.post("/api/auth/register", async (req, res) => {
+app.post("/api/auth/register", uploadProfile.array("photos", 3), async (req, res) => {
     try {
         const data = req.body;
+        const photos = req.files.map(f => f.path);
         const uniqueId = await generateUserId(data.state);
 
-        if (!data.password) 
-            return res.status(400).json({ success: false, message: "Password is required" });
-
+        if (!data.password) return res.status(400).json({ success: false, message: "Password is required" });
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
 
-        const user = new User({ ...data, password: hashedPassword, uniqueId });
+        const user = new User({ ...data, password: hashedPassword, uniqueId, photos });
         await user.save();
 
-        res.json({
-            success: true,
-            message: "User registered successfully",
-            userId: user._id,
-            uniqueId
-        });
-    } catch (e) {
-        res.status(500).json({ success: false, message: e.message });
-    }
-});
-
-
-
-// ----------- UPLOAD USER PHOTOS AFTER LOGIN ------------
-app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 3), async (req, res) => {
-    try {
-        const photoUrls = req.files.map(f => f.path);
-
-        const user = await User.findByIdAndUpdate(
-            req.userId,
-            { $push: { photos: { $each: photoUrls } } },
-            { new: true }
+        const emailContent = generateEmailTemplate(
+            "Welcome to KalyanaShobha",
+            `<p>Thank you for registering with us. We are delighted to have you on board.</p>
+             <p>Your unique Profile ID is: <strong>${uniqueId}</strong></p>
+             <p>Our team will review your profile shortly. Once approved, your profile will be visible to potential matches.</p>`
         );
 
-        res.json({
-            success: true,
-            message: "Photos uploaded successfully",
-            photos: user.photos
-        });
-    } catch (e) {
-        res.status(500).json({ success: false, message: e.message });
-    }
+        sendMail({ to: user.email, subject: "Welcome to KalyanaShobha - Registration Successful", html: emailContent });
+        res.json({ success: true, user });
+    } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
-
-
-
-
-
 
 app.post("/api/auth/login-init", async (req, res) => {
     try {
@@ -699,3 +663,6 @@ app.post("/api/user/get-contact", verifyUser, async (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+
+
