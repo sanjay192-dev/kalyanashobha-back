@@ -207,78 +207,76 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 const otpStore = {}; 
 
 
+// ====================================================================
+// MODIFIED: REGISTER (Data Only - Fast)
+// ====================================================================
+// Removed: uploadProfile.array("photos", 3) middleware
 app.post("/api/auth/register", async (req, res) => {
     try {
         const data = req.body;
         
-        // Generate ID
+        // Removed: const photos = req.files.map(f => f.path);
+        
         const uniqueId = await generateUserId(data.state);
 
         if (!data.password) return res.status(400).json({ success: false, message: "Password is required" });
-        
-        // Hash Password
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
 
-        // Create User with empty photos array
-        const user = new User({ 
-            ...data, 
-            password: hashedPassword, 
-            uniqueId, 
-            photos: [] // Initialize empty
-        });
-        
+        // Set photos to empty array [] initially
+        const user = new User({ ...data, password: hashedPassword, uniqueId, photos: [] });
         await user.save();
 
         const emailContent = generateEmailTemplate(
             "Welcome to KalyanaShobha",
-            `<p>Thank you for registering with us.</p>
+            `<p>Thank you for registering with us. We are delighted to have you on board.</p>
              <p>Your unique Profile ID is: <strong>${uniqueId}</strong></p>
-             <p><strong>Next Step:</strong> Please log in to upload your profile photos to complete your profile.</p>`
+             <p>Our team will review your profile shortly. Once approved, your profile will be visible to potential matches.</p>`
         );
 
         sendMail({ to: user.email, subject: "Welcome to KalyanaShobha - Registration Successful", html: emailContent });
         
-        res.json({ success: true, message: "Registration successful. Please login to upload photos.", user });
-    } catch (e) { 
-        console.error(e);
-        res.status(500).json({ success: false, message: e.message }); 
-    }
+        res.json({ success: true, user, message: "Registration successful. Please login to upload photos." });
+    } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
 
-
+// ====================================================================
+// NEW: UPLOAD PHOTOS (Separate Step)
+// ====================================================================
+// This route is called AFTER the user logs in
 app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 3), async (req, res) => {
     try {
-        // Check if files exist
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({ success: false, message: "No photos uploaded" });
         }
 
-        // Get paths from Cloudinary response
-        const newPhotos = req.files.map(f => f.path);
+        const photoUrls = req.files.map(f => f.path);
 
-        // Update the user found by ID (from the verified token)
-        // $push adds to existing, $set would replace all. 
-        // Using $push allows them to upload 1 by 1 or in batches.
-        const updatedUser = await User.findByIdAndUpdate(
+        // Update the logged-in user's photos
+        // Using $set to overwrite any existing photos, or $push to add to them.
+        // Here we use $set assuming this is the profile setup phase.
+        const user = await User.findByIdAndUpdate(
             req.userId,
-            { $push: { photos: { $each: newPhotos } } },
-            { new: true } // Return the updated document
-        );
+            { $set: { photos: photoUrls } },
+            { new: true } // Return the updated user
+        ).select("-password");
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
 
         res.json({ 
             success: true, 
             message: "Photos uploaded successfully", 
-            photos: updatedUser.photos 
+            photos: user.photos 
         });
-
+        
     } catch (e) {
-        console.error(e);
-        res.status(500).json({ success: false, message: "Photo upload failed" });
+        console.error("Photo Upload Error:", e);
+        res.status(500).json({ success: false, message: e.message });
     }
 });
-
 
 
 
