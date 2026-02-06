@@ -23,9 +23,18 @@ app.use(cors());
 app.use(express.json());
 
 // ---------------- DB CONNECTION ----------------
-mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log("MongoDB Connected"))
-    .catch(err => console.error("MongoDB Error:", err));
+mongoose.set("strictQuery", true);
+mongoose.set("bufferCommands", false);
+
+mongoose.connect(process.env.MONGO_URI, {
+    serverSelectionTimeoutMS: 20000,
+    socketTimeoutMS: 45000
+})
+.then(() => console.log("MongoDB Connected"))
+.catch(err => console.error("MongoDB Error:", err.message));
+
+
+
 
 // ---------------- CLOUDINARY CONFIG ----------------
 cloudinary.config({
