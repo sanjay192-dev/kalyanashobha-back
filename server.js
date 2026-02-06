@@ -1,5 +1,3 @@
-
-
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -208,29 +206,71 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 // ====================================================================
 const otpStore = {}; 
 
-app.post("/api/auth/register", uploadProfile.array("photos", 3), async (req, res) => {
+app.post("/api/auth/register", async (req, res) => {
     try {
         const data = req.body;
-        const photos = req.files.map(f => f.path);
         const uniqueId = await generateUserId(data.state);
 
-        if (!data.password) return res.status(400).json({ success: false, message: "Password is required" });
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(data.password, salt);
+        if (!data.password)
+            return res.status(400).json({ success: false, message: "Password is required" });
 
-        const user = new User({ ...data, password: hashedPassword, uniqueId, photos });
+        const hashedPassword = await bcrypt.hash(data.password, 10);
+
+        const user = new User({ 
+            ...data,
+            password: hashedPassword,
+            uniqueId,
+            photos: []   // <-- EMPTY NOW
+        });
+
         await user.save();
 
         const emailContent = generateEmailTemplate(
             "Welcome to KalyanaShobha",
-            `<p>Thank you for registering with us. We are delighted to have you on board.</p>
-             <p>Your unique Profile ID is: <strong>${uniqueId}</strong></p>
-             <p>Our team will review your profile shortly. Once approved, your profile will be visible to potential matches.</p>`
+            `<p>Thank you for registering with us.</p>
+             <p>Your unique Profile ID: <strong>${uniqueId}</strong></p>`
         );
 
-        sendMail({ to: user.email, subject: "Welcome to KalyanaShobha - Registration Successful", html: emailContent });
+        sendMail({
+            to: user.email,
+            subject: "Welcome to KalyanaShobha - Registration Successful",
+            html: emailContent
+        });
+
         res.json({ success: true, user });
-    } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+
+
+app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 3), async (req, res) => {
+    try {
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ success: false, message: "No photos uploaded" });
+        }
+
+        const user = await User.findById(req.userId);
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        const uploadedPhotos = req.files.map(f => f.path);
+
+        // Append or Replace Photos (You choose — here replacing)
+        user.photos = uploadedPhotos;
+
+        await user.save();
+
+        res.json({
+            success: true,
+            message: "Photos uploaded successfully",
+            photos: user.photos
+        });
+
+    } catch (err) {
+        console.error("UPLOAD ERROR:", err);
+        res.status(500).json({ success: false, message: err.message });
+    }
 });
 
 app.post("/api/auth/login-init", async (req, res) => {
