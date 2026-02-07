@@ -265,6 +265,49 @@ app.post("/api/auth/register", async (req, res) => {
 });
 
 
+
+
+
+// 2. REGISTER VERIFY (Check OTP & Activate)
+app.post("/api/auth/register-verify", async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+
+        // Check OTP
+        if (otpStore[email] && parseInt(otpStore[email]) === parseInt(otp)) {
+            
+            // Find and Update User
+            const user = await User.findOne({ email });
+            if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+            user.isEmailVerified = true;
+            await user.save();
+
+            // Clear OTP
+            delete otpStore[email];
+
+            // Generate Token immediately so they don't have to login again
+            const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || "fallback_secret_key", { expiresIn: "7d" });
+
+            // Send Welcome Email (Post-Verification)
+            const welcomeContent = generateEmailTemplate(
+                "Welcome to KalyanaShobha",
+                `<p>Your email has been verified successfully!</p>
+                 <p>Your unique Profile ID is: <strong>${user.uniqueId}</strong></p>
+                 <p><strong>Next Step:</strong> Please upload your profile photos to get better matches.</p>`
+            );
+            sendMail({ to: user.email, subject: "Welcome - Registration Verified", html: welcomeContent });
+
+            res.json({ success: true, token, user, message: "Email Verified Successfully" });
+        } else {
+            res.status(400).json({ success: false, message: "Invalid or Expired OTP" });
+        }
+    } catch (e) { 
+        res.status(500).json({ success: false, message: e.message }); 
+    }
+});
+
+
 app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 5), async (req, res) => {
     try {
         if (!req.files || req.files.length === 0) {
