@@ -499,6 +499,118 @@ app.post("/api/users/search", async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+
+// ====================================================================
+// F. USER DASHBOARD (SMART MATCHES: Age + Community + Marital Status)
+// ====================================================================
+
+app.get("/api/user/dashboard-matches", verifyUser, async (req, res) => {
+    try {
+        // 1. Get Logged-in User
+        const currentUser = await User.findById(req.userId);
+        if (!currentUser) return res.status(404).json({ success: false, message: "User not found" });
+
+        // 2. Determine Limits (Paid vs Free)
+        const isPremium = currentUser.isApproved && currentUser.isPaidMember;
+        const profileLimit = isPremium ? 50 : 2;
+
+        // 3. Basic Filters (Gender, Approval, Active)
+        const targetGender = currentUser.gender === 'Male' ? 'Female' : 'Male';
+        
+        let query = {
+            gender: targetGender,
+            isApproved: true,
+            isActive: true,
+            _id: { $ne: currentUser._id } // Don't show myself
+        };
+
+        // --- FILTER 1: COMMUNITY (Strict) ---
+        if (currentUser.caste) {
+            query.caste = currentUser.caste;
+        }
+
+        // --- FILTER 2: MARITAL STATUS (Logic) ---
+        if (currentUser.maritalStatus === 'Never Married') {
+            query.maritalStatus = 'Never Married';
+        } else {
+            // Divorced/Widowed can usually see others in same boat
+            query.maritalStatus = { $in: ['Divorced', 'Widowed', 'Awaiting Divorce'] };
+        }
+
+        // --- FILTER 3: AGE (Date of Birth) ---
+        if (currentUser.dob) {
+            const userDob = new Date(currentUser.dob);
+            const userYear = userDob.getFullYear();
+            const today = new Date();
+            const currentYear = today.getFullYear();
+
+            let minAge, maxAge;
+
+            // Logic: Males want Younger Females. Females want Older Males.
+            if (currentUser.gender === 'Male') {
+                // If I am Male (e.g. 28), I want Female (23 to 28)
+                const myAge = currentYear - userYear;
+                minAge = myAge - 5; // e.g. 23
+                maxAge = myAge;     // e.g. 28
+            } else {
+                // If I am Female (e.g. 25), I want Male (25 to 30)
+                const myAge = currentYear - userYear;
+                minAge = myAge;     // e.g. 25
+                maxAge = myAge + 5; // e.g. 30
+            }
+
+            // Convert Age back to Date for Database Query
+            const minDobDate = new Date(currentYear - maxAge, 0, 1); 
+            const maxDobDate = new Date(currentYear - minAge, 11, 31); 
+
+            query.dob = { $gte: minDobDate, $lte: maxDobDate };
+        }
+
+        // 4. Fetch & Limit
+        const matches = await User.find(query)
+            .select('firstName lastName dob caste highestQualification jobRole maritalStatus photos city state')
+            .limit(profileLimit);
+
+        // 5. Format Output
+        const formattedMatches = matches.map(profile => {
+            // Calculate Age
+            const dob = new Date(profile.dob);
+            const ageDiffMs = Date.now() - dob.getTime();
+            const ageDate = new Date(ageDiffMs);
+            const age = Math.abs(ageDate.getUTCFullYear() - 1970);
+
+            return {
+                id: profile._id,
+                name: `${profile.firstName} ${profile.lastName}`,
+                age: age,
+                subCommunity: profile.caste,
+                education: profile.highestQualification, // Still sending the data to frontend, just not filtering by it
+                job: profile.jobRole,
+                maritalStatus: profile.maritalStatus,
+                photo: profile.photos.length > 0 ? profile.photos[0] : null,
+                location: `${profile.city}, ${profile.state}`
+            };
+        });
+
+        res.json({ 
+            success: true, 
+            count: formattedMatches.length, 
+            isPremium, 
+            data: formattedMatches 
+        });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ success: false, message: "Error fetching matches" });
+    }
+});
+
+
+
+
+
+
+
 // ====================================================================
 // D. ADMIN DASHBOARD & MANAGEMENT (SECURE)
 // ====================================================================
