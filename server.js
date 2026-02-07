@@ -207,30 +207,94 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 // ====================================================================
 const otpStore = {}; 
 
-app.post("/api/auth/register", uploadProfile.array("photos", 3), async (req, res) => {
+app.post("/api/auth/register", async (req, res) => {
     try {
         const data = req.body;
-        const photos = req.files.map(f => f.path);
+
+        // Check if user exists
+        const existingUser = await User.findOne({ email: data.email });
+        if (existingUser) return res.status(400).json({ success: false, message: "User already exists" });
+
         const uniqueId = await generateUserId(data.state);
 
         if (!data.password) return res.status(400).json({ success: false, message: "Password is required" });
+        
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
 
-        const user = new User({ ...data, password: hashedPassword, uniqueId, photos });
+        // Create User (isEmailVerified: false by default)
+        // Note: photos is empty initially
+        const user = new User({ 
+            ...data, 
+            password: hashedPassword, 
+            uniqueId, 
+            photos: [],
+            isEmailVerified: false 
+        });
+        
         await user.save();
 
+        // GENERATE OTP
+        const otp = Math.floor(100000 + Math.random() * 900000);
+        otpStore[data.email] = otp; // Store OTP in memory
+        
+        // Auto-expire OTP after 10 minutes
+        setTimeout(() => delete otpStore[data.email], 600000);
+
+        // Send OTP Email
         const emailContent = generateEmailTemplate(
-            "Welcome to KalyanaShobha",
-            `<p>Thank you for registering with us. We are delighted to have you on board.</p>
-             <p>Your unique Profile ID is: <strong>${uniqueId}</strong></p>
-             <p>Our team will review your profile shortly. Once approved, your profile will be visible to potential matches.</p>`
+            "Verify Your Email",
+            `<p>Welcome to KalyanaShobha! Your registration is almost complete.</p>
+             <p>Please enter the following OTP to verify your email address:</p>
+             <h2 style="color: #2c3e50; letter-spacing: 5px;">${otp}</h2>
+             <p>Once verified, you can log in and upload your photos.</p>`
         );
 
-        sendMail({ to: user.email, subject: "Welcome to KalyanaShobha - Registration Successful", html: emailContent });
-        res.json({ success: true, user });
-    } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+        sendMail({ to: user.email, subject: "Verify Your Email - KalyanaShobha", html: emailContent });
+
+        res.json({ 
+            success: true, 
+            message: "Registration successful. Please check your email for OTP.",
+            email: user.email // Send back to client to pre-fill OTP screen
+        });
+
+    } catch (e) { 
+        console.error(e);
+        res.status(500).json({ success: false, message: e.message }); 
+    }
 });
+
+
+app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 5), async (req, res) => {
+    try {
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ success: false, message: "No files uploaded" });
+        }
+
+        const photoUrls = req.files.map(f => f.path);
+
+        // Update User Photos
+        const user = await User.findByIdAndUpdate(
+            req.userId, 
+            { $push: { photos: { $each: photoUrls } } }, // Add new photos to existing array
+            { new: true }
+        );
+
+        res.json({ 
+            success: true, 
+            message: "Photos uploaded successfully", 
+            photos: user.photos 
+        });
+
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+
+
+
+
 
 app.post("/api/auth/login-init", async (req, res) => {
     try {
