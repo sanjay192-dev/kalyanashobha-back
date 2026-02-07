@@ -205,11 +205,14 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// ====================================================================
-// B. USER AUTH (Register & Secure Login with OTP)
-// ====================================================================
+
 const otpStore = {}; 
 
+// ====================================================================
+// B. USER AUTH (Direct Register -> Email Notifications)
+// ====================================================================
+
+// 1. REGISTER (Single Step: Save, Email User, Email Admin)
 app.post("/api/auth/register", async (req, res) => {
     try {
         const data = req.body;
@@ -221,44 +224,67 @@ app.post("/api/auth/register", async (req, res) => {
         const uniqueId = await generateUserId(data.state);
 
         if (!data.password) return res.status(400).json({ success: false, message: "Password is required" });
-        
+
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
 
-        // Create User (isEmailVerified: false by default)
-        // Note: photos is empty initially
+        // Create User
+        // We save them immediately. Verification happens implicitly via the Login OTP flow later.
         const user = new User({ 
             ...data, 
             password: hashedPassword, 
             uniqueId, 
             photos: [],
-            isEmailVerified: false 
+            isEmailVerified: false, // Will be "verified" effectively when they first successfully login with OTP
+            isActive: true 
         });
-        
+
         await user.save();
 
-        // GENERATE OTP
-        const otp = Math.floor(100000 + Math.random() * 900000);
-        otpStore[data.email] = otp; // Store OTP in memory
-        
-        // Auto-expire OTP after 10 minutes
-        setTimeout(() => delete otpStore[data.email], 600000);
-
-        // Send OTP Email
-        const emailContent = generateEmailTemplate(
-            "Verify Your Email",
-            `<p>Welcome to KalyanaShobha! Your registration is almost complete.</p>
-             <p>Please enter the following OTP to verify your email address:</p>
-             <h2 style="color: #2c3e50; letter-spacing: 5px;">${otp}</h2>
-             <p>Once verified, you can log in and upload your photos.</p>`
+        // --- EMAIL 1: WELCOME MESSAGE TO USER ---
+        const userWelcomeContent = generateEmailTemplate(
+            "Welcome to KalyanaShobha!",
+            `<p>Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
+             <p>Thank you for registering with us. Your profile has been created successfully.</p>
+             <p><strong>Your Profile ID:</strong> ${user.uniqueId}</p>
+             <p>You can now log in using your email and password to update your profile and upload photos.</p>
+             <div style="text-align: center; margin: 20px 0;">
+                <p style="color: #555;">(Note: For security, you will receive an OTP every time you log in.)</p>
+             </div>`
         );
 
-        sendMail({ to: user.email, subject: "Verify Your Email - KalyanaShobha", html: emailContent });
+        sendMail({ 
+            to: user.email, 
+            subject: "Welcome to KalyanaShobha Matrimony", 
+            html: userWelcomeContent 
+        });
+
+        // --- EMAIL 2: NEW REGISTRATION ALERT TO ADMIN ---
+        const adminAlertContent = generateEmailTemplate(
+            "New User Registration",
+            `<p>A new user has just registered on the platform.</p>
+             <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Name:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.firstName} ${user.lastName}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Profile ID:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.uniqueId}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Email:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.email}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Mobile:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.mobileNumber}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>State/City:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.state}, ${user.city}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Gender:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.gender}</td></tr>
+             </table>
+             <p style="margin-top: 15px;">Please login to the Admin Dashboard to review/approve this profile.</p>`
+        );
+
+        // Send to the admin email configured in environment variables
+        sendMail({ 
+            to: process.env.EMAIL_USER, // sending to your own admin email
+            subject: `New User: ${user.uniqueId} (${user.firstName})`, 
+            html: adminAlertContent 
+        });
 
         res.json({ 
             success: true, 
-            message: "Registration successful. Please check your email for OTP.",
-            email: user.email // Send back to client to pre-fill OTP screen
+            message: "Registration successful! Please login to continue.",
+            email: user.email
         });
 
     } catch (e) { 
@@ -267,48 +293,6 @@ app.post("/api/auth/register", async (req, res) => {
     }
 });
 
-
-
-
-
-// 2. REGISTER VERIFY (Check OTP & Activate)
-app.post("/api/auth/register-verify", async (req, res) => {
-    try {
-        const { email, otp } = req.body;
-
-        // Check OTP
-        if (otpStore[email] && parseInt(otpStore[email]) === parseInt(otp)) {
-            
-            // Find and Update User
-            const user = await User.findOne({ email });
-            if (!user) return res.status(404).json({ success: false, message: "User not found" });
-
-            user.isEmailVerified = true;
-            await user.save();
-
-            // Clear OTP
-            delete otpStore[email];
-
-            // Generate Token immediately so they don't have to login again
-            const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || "fallback_secret_key", { expiresIn: "7d" });
-
-            // Send Welcome Email (Post-Verification)
-            const welcomeContent = generateEmailTemplate(
-                "Welcome to KalyanaShobha",
-                `<p>Your email has been verified successfully!</p>
-                 <p>Your unique Profile ID is: <strong>${user.uniqueId}</strong></p>
-                 <p><strong>Next Step:</strong> Please upload your profile photos to get better matches.</p>`
-            );
-            sendMail({ to: user.email, subject: "Welcome - Registration Verified", html: welcomeContent });
-
-            res.json({ success: true, token, user, message: "Email Verified Successfully" });
-        } else {
-            res.status(400).json({ success: false, message: "Invalid or Expired OTP" });
-        }
-    } catch (e) { 
-        res.status(500).json({ success: false, message: e.message }); 
-    }
-});
 
 
 app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 5), async (req, res) => {
