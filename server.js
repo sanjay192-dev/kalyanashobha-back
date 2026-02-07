@@ -56,8 +56,11 @@ const uploadVendor = multer({ storage: vendorStorage });
 
 // ---------------- EMAIL SYSTEM (PROFESSIONAL) ----------------
 const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
+  service: "gmail",
+  auth: {
+    user: "adepusanjay444@gmail.com",
+    pass: "lrnesuqvssiognej"   // Gmail App Password
+  }
 });
 
 // Professional HTML Template Generator
