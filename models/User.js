@@ -42,8 +42,7 @@ const UserSchema = new mongoose.Schema({
   email: { type: String, unique: true, required: true },
   password: { type: String, required: true }, // ADDED: For Login
   mobileNumber: { type: String, unique: true, required: true },
-  isMobileVerified: { type: Boolean, default: false },
-
+  isEmailVerified: { type: Boolean, default: false },
   // --- J. Photos ---
   photos: [{ type: String }],
 
