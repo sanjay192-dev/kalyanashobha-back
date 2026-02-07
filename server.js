@@ -619,26 +619,45 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
+
 // 2. Admin Verify Registration
 app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res) => {
     try {
         const { paymentId, action } = req.body;
+        
+        // Find the payment record
         const payment = await PaymentRegistration.findById(paymentId);
+        if (!payment) return res.status(404).json({ success: false, message: "Payment not found" });
+
+        // Find the user associated with this payment
         const user = await User.findById(payment.userId);
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
         if (action === "approve") {
-            payment.status = "Success"; user.isPaidMember = true;
-            await payment.save(); await user.save();
+            // --- UPDATED LOGIC START ---
+            payment.status = "Success"; 
+            
+            user.isPaidMember = true;   // Mark as Paid
+            user.isApproved = true;     // MAKE VISIBLE TO OTHERS (Profile Approved)
+            user.isActive = true;       // Ensure account is active/unblocked
+            
+            // Save both
+            await payment.save(); 
+            await user.save();
+            // --- UPDATED LOGIC END ---
 
             const emailContent = generateEmailTemplate(
                 "Membership Activated",
                 `<p>We verified your payment successfully.</p>
-                 <p>Your Paid Membership is now <strong>Active</strong>. You can now access premium features.</p>`
+                 <p>Your Paid Membership is now <strong>Active</strong>. Your profile is now visible to matches and you can access premium features.</p>`
             );
             sendMail({ to: user.email, subject: "Membership Activated", html: emailContent });
 
         } else {
-            payment.status = "Rejected"; await payment.save();
+            // Rejection Logic
+            payment.status = "Rejected"; 
+            await payment.save();
+            
             const emailContent = generateEmailTemplate(
                 "Payment Verification Failed",
                 `<p>We could not verify your recent payment transaction.</p>
@@ -646,9 +665,15 @@ app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res)
             );
             sendMail({ to: user.email, subject: "Action Required: Payment Issue", html: emailContent });
         }
-        res.json({ success: true });
-    } catch (e) { res.status(500).json({ success: false }); }
+        
+        res.json({ success: true, message: "Action processed successfully" });
+
+    } catch (e) { 
+        console.error(e);
+        res.status(500).json({ success: false, message: "Server Error" }); 
+    }
 });
+
 
 
 // 3. Submit Interest (User) - Both User and Admin receive emails
