@@ -295,6 +295,101 @@ app.post("/api/auth/register", async (req, res) => {
 
 
 
+// ======================== FORGOT PASSWORD (SEND OTP) =========================
+
+app.post("/api/auth/forgot-password", async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(404).json({ success: false, message: "Email not found" });
+        }
+
+        // Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        otpStore[email] = otp;
+
+        // Email Template
+        const htmlTemplate = generateEmailTemplate(
+            "Password Reset OTP",
+            `<p>Your OTP for resetting password is:</p>
+             <h2 style="letter-spacing: 3px; color:#2c3e50;">${otp}</h2>
+             <p>This OTP is valid for <strong>5 minutes</strong>.</p>`
+        );
+
+        await sendMail({
+            to: email,
+            subject: "Reset Password - OTP Verification",
+            html: htmlTemplate
+        });
+
+        res.json({
+            success: true,
+            message: "OTP sent to your registered email."
+        });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+
+// ======================== VERIFY OTP =========================
+
+app.post("/api/auth/verify-otp", (req, res) => {
+    const { email, otp } = req.body;
+
+    if (!otpStore[email]) {
+        return res.status(400).json({ success: false, message: "OTP not requested or expired" });
+    }
+
+    if (otpStore[email] !== otp) {
+        return res.status(400).json({ success: false, message: "Invalid OTP" });
+    }
+
+    // OTP matched - allow reset
+    otpStore[email] = "VERIFIED";
+
+    res.json({ success: true, message: "OTP verified successfully" });
+});
+
+
+// ======================== RESET PASSWORD =========================
+
+app.post("/api/auth/reset-password", async (req, res) => {
+    try {
+        const { email, newPassword } = req.body;
+
+        if (!otpStore[email] || otpStore[email] !== "VERIFIED") {
+            return res.status(400).json({ success: false, message: "OTP not verified" });
+        }
+
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        // Hash new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        user.password = hashedPassword;
+        await user.save();
+
+        // Delete used OTP
+        delete otpStore[email];
+
+        res.json({ success: true, message: "Password reset successful!" });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+
+
 app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 5), async (req, res) => {
     try {
         if (!req.files || req.files.length === 0) {
