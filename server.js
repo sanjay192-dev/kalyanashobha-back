@@ -1092,16 +1092,33 @@ app.get("/api/user/payment-history", verifyUser, async (req, res) => {
 // 1. Get "Received" Interests (Requests others sent to ME)
 app.get("/api/user/interests/received", verifyUser, async (req, res) => {
     try {
-        // Find interests where I am the RECEIVER
-        // Only show interests that have passed payment verification (PendingUser, Accepted, etc.)
         const requests = await Interest.find({ 
             receiverId: req.userId,
             status: { $in: ['PendingUser', 'Accepted', 'Declined'] } 
         })
-        .populate('senderId', 'firstName lastName uniqueId photos jobRole city state annualIncome dob')
+        // 1. ADD 'mobileNumber' and 'email' HERE so the DB actually returns them
+        .populate('senderId', 'firstName lastName uniqueId photos jobRole city state annualIncome dob mobileNumber email')
         .sort({ date: -1 });
 
-        res.json({ success: true, count: requests.length, data: requests });
+        // 2. OPTIONAL BUT RECOMMENDED: Hide details if not 'Accepted' (Security)
+        const formattedRequests = requests.map(req => {
+            const isAccepted = req.status === 'Accepted';
+            
+            // We clone the sender object to avoid modifying the DB document directly
+            const senderData = req.senderId.toObject(); 
+            
+            if (!isAccepted) {
+                senderData.mobileNumber = "Locked";
+                senderData.email = "Locked";
+            }
+            
+            return {
+                ...req.toObject(),
+                senderId: senderData
+            };
+        });
+
+        res.json({ success: true, count: formattedRequests.length, data: formattedRequests });
     } catch (e) {
         res.status(500).json({ success: false, message: "Server Error" });
     }
