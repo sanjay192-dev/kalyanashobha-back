@@ -390,6 +390,54 @@ app.post("/api/auth/reset-password", async (req, res) => {
 
 
 
+
+// ====================================================================
+// USER PROFILE (View & Update)
+// ====================================================================
+
+// 1. Get My Profile Data
+app.get("/api/user/my-profile", verifyUser, async (req, res) => {
+    try {
+        const user = await User.findById(req.userId).select("-password -otp");
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+        
+        res.json({ success: true, user });
+    } catch (e) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// 2. Update Profile Details
+app.put("/api/user/update-profile", verifyUser, async (req, res) => {
+    try {
+        const { 
+            firstName, lastName, religion, caste, subCommunity, 
+            state, city, education, jobRole, annualIncome, 
+            height, diet, maritalStatus, aboutMe 
+        } = req.body;
+
+        // Create an update object (prevent updating sensitive fields like email/password here)
+        const updateData = {
+            firstName, lastName, religion, caste, subCommunity,
+            state, city, highestQualification: education, jobRole, annualIncome,
+            height, diet, maritalStatus, aboutMe
+        };
+
+        const updatedUser = await User.findByIdAndUpdate(
+            req.userId, 
+            { $set: updateData },
+            { new: true } // Return the updated document
+        ).select("-password");
+
+        res.json({ success: true, message: "Profile Updated", user: updatedUser });
+    } catch (e) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+
+
+
 app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 5), async (req, res) => {
     try {
         if (!req.files || req.files.length === 0) {
@@ -985,6 +1033,90 @@ app.post("/api/user/get-contact", verifyUser, async (req, res) => {
         }
     } catch (e) { res.status(500).json({ success: false }); }
 });
+
+
+
+
+// ====================================================================
+// PAYMENT HISTORY
+// ====================================================================
+
+app.get("/api/user/payment-history", verifyUser, async (req, res) => {
+    try {
+        // Fetch Membership Payments
+        const membershipPayments = await PaymentRegistration.find({ userId: req.userId })
+            .sort({ date: -1 });
+
+        // Fetch Interest Payments (Where I am the sender)
+        const interestPayments = await PaymentInterest.find({ senderId: req.userId })
+            .populate('receiverId', 'firstName lastName') // Show who I paid for
+            .sort({ date: -1 });
+
+        res.json({ 
+            success: true, 
+            membershipHistory: membershipPayments,
+            interestHistory: interestPayments 
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, message: "Error fetching payments" });
+    }
+});
+
+
+
+// ====================================================================
+// INTERESTS DASHBOARD (Sent & Received)
+// ====================================================================
+
+// 1. Get "Received" Interests (Requests others sent to ME)
+app.get("/api/user/interests/received", verifyUser, async (req, res) => {
+    try {
+        // Find interests where I am the RECEIVER
+        // Only show interests that have passed payment verification (PendingUser, Accepted, etc.)
+        const requests = await Interest.find({ 
+            receiverId: req.userId,
+            status: { $in: ['PendingUser', 'Accepted', 'Declined'] } 
+        })
+        .populate('senderId', 'firstName lastName uniqueId photos jobRole city state annualIncome dob')
+        .sort({ date: -1 });
+
+        res.json({ success: true, count: requests.length, data: requests });
+    } catch (e) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// 2. Get "Sent" Interests (Requests I sent to OTHERS)
+app.get("/api/user/interests/sent", verifyUser, async (req, res) => {
+    try {
+        // Find interests where I am the SENDER
+        const sentRequests = await Interest.find({ senderId: req.userId })
+        .populate('receiverId', 'firstName lastName uniqueId photos mobileNumber email') // We need contact info if Accepted
+        .sort({ date: -1 });
+
+        // Transform data to hide contact info unless status is 'Accepted'
+        const formattedRequests = sentRequests.map(req => {
+            const isAccepted = req.status === 'Accepted';
+            return {
+                _id: req._id,
+                status: req.status,
+                date: req.date,
+                receiverProfile: {
+                    name: `${req.receiverId.firstName} ${req.receiverId.lastName}`,
+                    photo: req.receiverId.photos[0] || null,
+                    // LOGIC: Only show phone/email if Accepted
+                    mobile: isAccepted ? req.receiverId.mobileNumber : "Locked",
+                    email: isAccepted ? req.receiverId.email : "Locked"
+                }
+            };
+        });
+
+        res.json({ success: true, count: formattedRequests.length, data: formattedRequests });
+    } catch (e) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
