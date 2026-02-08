@@ -552,24 +552,52 @@ app.post("/api/users/search", async (req, res) => {
 // F. USER DASHBOARD (SMART MATCHES: Age + Community + Marital Status)
 // ====================================================================
 
+
+
+// ====================================================================
+// F. USER DASHBOARD (SMART MATCHES: Age + Community + Marital Status)
+// ====================================================================
+
 app.get("/api/user/dashboard-matches", verifyUser, async (req, res) => {
     try {
         // 1. Get Logged-in User
         const currentUser = await User.findById(req.userId);
         if (!currentUser) return res.status(404).json({ success: false, message: "User not found" });
 
+        // --- NEW LOGIC START: FETCH INTERACTED USERS ---
+        // Find all interests where I am the Sender OR the Receiver
+        // This covers: Pending, Accepted, Rejected, Declined
+        const interactions = await Interest.find({
+            $or: [
+                { senderId: req.userId }, 
+                { receiverId: req.userId }
+            ]
+        }).select('senderId receiverId');
+
+        // Create an array of IDs to exclude
+        // If I am the sender, exclude the receiver. If I am the receiver, exclude the sender.
+        const excludedIds = interactions.map(inter => 
+            inter.senderId.toString() === req.userId.toString() 
+                ? inter.receiverId.toString() 
+                : inter.senderId.toString()
+        );
+
+        // Also exclude my own ID
+        excludedIds.push(req.userId);
+        // --- NEW LOGIC END ---
+
         // 2. Determine Limits (Paid vs Free)
         const isPremium = currentUser.isApproved && currentUser.isPaidMember;
         const profileLimit = isPremium ? 50 : 2;
 
-        // 3. Basic Filters (Gender, Approval, Active)
+        // 3. Basic Filters
         const targetGender = currentUser.gender === 'Male' ? 'Female' : 'Male';
-        
+
         let query = {
             gender: targetGender,
             isApproved: true,
             isActive: true,
-            _id: { $ne: currentUser._id } // Don't show myself
+            _id: { $nin: excludedIds } // <--- KEY CHANGE: Exclude everyone in the list
         };
 
         // --- FILTER 1: COMMUNITY (Strict) ---
@@ -581,7 +609,6 @@ app.get("/api/user/dashboard-matches", verifyUser, async (req, res) => {
         if (currentUser.maritalStatus === 'Never Married') {
             query.maritalStatus = 'Never Married';
         } else {
-            // Divorced/Widowed can usually see others in same boat
             query.maritalStatus = { $in: ['Divorced', 'Widowed', 'Awaiting Divorce'] };
         }
 
@@ -594,20 +621,16 @@ app.get("/api/user/dashboard-matches", verifyUser, async (req, res) => {
 
             let minAge, maxAge;
 
-            // Logic: Males want Younger Females. Females want Older Males.
             if (currentUser.gender === 'Male') {
-                // If I am Male (e.g. 28), I want Female (23 to 28)
                 const myAge = currentYear - userYear;
-                minAge = myAge - 5; // e.g. 23
-                maxAge = myAge;     // e.g. 28
+                minAge = myAge - 5; 
+                maxAge = myAge;     
             } else {
-                // If I am Female (e.g. 25), I want Male (25 to 30)
                 const myAge = currentYear - userYear;
-                minAge = myAge;     // e.g. 25
-                maxAge = myAge + 5; // e.g. 30
+                minAge = myAge;     
+                maxAge = myAge + 5; 
             }
 
-            // Convert Age back to Date for Database Query
             const minDobDate = new Date(currentYear - maxAge, 0, 1); 
             const maxDobDate = new Date(currentYear - minAge, 11, 31); 
 
@@ -621,7 +644,6 @@ app.get("/api/user/dashboard-matches", verifyUser, async (req, res) => {
 
         // 5. Format Output
         const formattedMatches = matches.map(profile => {
-            // Calculate Age
             const dob = new Date(profile.dob);
             const ageDiffMs = Date.now() - dob.getTime();
             const ageDate = new Date(ageDiffMs);
@@ -632,7 +654,7 @@ app.get("/api/user/dashboard-matches", verifyUser, async (req, res) => {
                 name: `${profile.firstName} ${profile.lastName}`,
                 age: age,
                 subCommunity: profile.caste,
-                education: profile.highestQualification, // Still sending the data to frontend, just not filtering by it
+                education: profile.highestQualification, 
                 job: profile.jobRole,
                 maritalStatus: profile.maritalStatus,
                 photo: profile.photos.length > 0 ? profile.photos[0] : null,
@@ -652,7 +674,6 @@ app.get("/api/user/dashboard-matches", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Error fetching matches" });
     }
 });
-
 
 
 
