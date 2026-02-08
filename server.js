@@ -1144,6 +1144,7 @@ app.get("/api/user/interests/sent", verifyUser, async (req, res) => {
                     photo: req.receiverId.photos[0] || null,
                     // LOGIC: Only show phone/email if Accepted
                     mobile: isAccepted ? req.receiverId.mobileNumber : "Locked",
+uniqueId: req.receiverId.uniqueId, 
                     email: isAccepted ? req.receiverId.email : "Locked"
                 }
             };
