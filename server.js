@@ -166,19 +166,32 @@ const verifyUser = (req, res, next) => {
 
 app.post("/api/admin/seed", async (req, res) => {
     try {
-        const existingAdmin = await Admin.findOne({ email: "admin@kalyanashobha.com" });
-        if (existingAdmin) return res.status(400).json({ message: "Admin already exists" });
+        // 1. Define the admin email in one place to avoid mismatch
+        const adminEmail = "adepusanjay444@gmail.com"; 
+
+        // 2. Check for THIS email
+        const existingAdmin = await Admin.findOne({ email: adminEmail });
+        if (existingAdmin) {
+            return res.status(400).json({ success: false, message: "Admin already exists" });
+        }
 
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash("admin123", salt);
 
+        // 3. Create using the SAME email
         const admin = new Admin({
-            username: "SuperAdmin", email: "adepusanjay444@gmail.com",
-            password: hashedPassword, role: "SuperAdmin"
+            username: "SuperAdmin", 
+            email: adminEmail,
+            password: hashedPassword, 
+            role: "SuperAdmin"
         });
+        
         await admin.save();
-        res.json({ success: true, message: "Admin Created" });
-    } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+        res.json({ success: true, message: "Admin Created Successfully" });
+
+    } catch (e) { 
+        res.status(500).json({ success: false, message: e.message }); 
+    }
 });
 
 // --- STEP 1: Validate Password & Send OTP ---
