@@ -1406,6 +1406,89 @@ uniqueId: req.receiverId.uniqueId,
 });
 
 
+
+
+// ====================================================================
+// MISSING API 1: Advanced List (Pagination + Quick Search + Filters)
+// ====================================================================
+app.get("/api/admin/users/advanced", verifyAdmin, async (req, res) => {
+    try {
+        const { search, referralType, status, page = 1, limit = 10 } = req.query;
+        
+        const query = {};
+
+        // 1. Search Logic (Name, Email, Mobile, or UniqueID)
+        if (search) {
+            query.$or = [
+                { firstName: { $regex: search, $options: "i" } },
+                { lastName: { $regex: search, $options: "i" } },
+                { email: { $regex: search, $options: "i" } },
+                { mobileNumber: { $regex: search, $options: "i" } },
+                { uniqueId: { $regex: search, $options: "i" } }
+            ];
+        }
+
+        // 2. Referral Filter
+        if (referralType === 'agent') {
+            query.referredByAgentId = { $ne: null }; 
+        } else if (referralType === 'self') {
+            query.referredByAgentId = null; 
+        }
+
+        // 3. Status Filter
+        if (status === 'blocked') query.isActive = false;
+        if (status === 'active') query.isActive = true;
+        if (status === 'pending') query.isApproved = false;
+
+        // 4. Execute with Pagination
+        const users = await User.find(query)
+            .sort({ createdAt: -1 })
+            .limit(limit * 1)
+            .skip((page - 1) * limit)
+            .select('-password');
+
+        const count = await User.countDocuments(query);
+
+        res.json({ 
+            success: true, 
+            users, 
+            totalPages: Math.ceil(count / limit), 
+            currentPage: Number(page),
+            totalUsers: count
+        });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// ====================================================================
+// MISSING API 2: Delete User
+// ====================================================================
+app.delete("/api/admin/users/:id", verifyAdmin, async (req, res) => {
+    try {
+        const userId = req.params.id;
+        
+        // Optional: Clean up related data (Payments, Interests) if necessary
+        // await PaymentRegistration.deleteMany({ userId });
+        // await Interest.deleteMany({ $or: [{ senderId: userId }, { receiverId: userId }] });
+
+        const deletedUser = await User.findByIdAndDelete(userId);
+        
+        if (!deletedUser) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        res.json({ success: true, message: "User deleted permanently" });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
