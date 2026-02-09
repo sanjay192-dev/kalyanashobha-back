@@ -904,6 +904,88 @@ app.post("/api/admin/users/status", verifyAdmin, async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
+
+
+
+// ====================================================================
+// NEW: SPECIFIC ADVANCED SEARCH API
+// ====================================================================
+
+app.post("/api/admin/users/search-advanced", verifyAdmin, async (req, res) => {
+    try {
+        const {
+            // Basic
+            memberId, gender, maritalStatus,
+            // Age Range
+            minAge, maxAge,
+            // Location
+            country, state, city,
+            // Community
+            religion, caste, subCommunity,
+            // Professional
+            education, occupation
+        } = req.body;
+
+        let query = {};
+
+        // 1. Exact Match Fields
+        if (memberId) query.uniqueId = { $regex: memberId, $options: 'i' };
+        if (gender) query.gender = gender;
+        if (maritalStatus) query.maritalStatus = maritalStatus;
+        if (religion) query.religion = religion;
+        if (caste) query.caste = { $regex: caste, $options: 'i' };
+        if (subCommunity) query.subCommunity = { $regex: subCommunity, $options: 'i' };
+        if (country) query.country = { $regex: country, $options: 'i' };
+        if (state) query.state = { $regex: state, $options: 'i' };
+        if (city) query.city = { $regex: city, $options: 'i' };
+        
+        // 2. Professional (Partial Matches)
+        if (education) query.highestQualification = { $regex: education, $options: 'i' };
+        if (occupation) query.jobRole = { $regex: occupation, $options: 'i' };
+
+        // 3. Age Calculation (Converting Age to Date of Birth range)
+        if (minAge || maxAge) {
+            const today = new Date();
+            query.dob = {};
+            
+            if (maxAge) {
+                // If max age is 30, birth date must be >= 30 years ago
+                const maxDate = new Date(new Date().setFullYear(today.getFullYear() - maxAge));
+                query.dob.$gte = maxDate; 
+            }
+            
+            if (minAge) {
+                // If min age is 20, birth date must be <= 20 years ago
+                const minDate = new Date(new Date().setFullYear(today.getFullYear() - minAge));
+                query.dob.$lte = minDate;
+            }
+        }
+
+        const users = await User.find(query).select('-password');
+        
+        res.json({ 
+            success: true, 
+            count: users.length, 
+            users 
+        });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+
+
+
+
+
+
+
+
+
+
+
 app.post("/api/admin/agents", verifyAdmin, async (req, res) => {
     try {
         const agent = new Agent(req.body);
