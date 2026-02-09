@@ -708,18 +708,86 @@ app.get("/api/user/dashboard-matches", verifyUser, async (req, res) => {
 
 app.get("/api/admin/stats", verifyAdmin, async (req, res) => {
     try {
-        const [users, males, females, paid, pending, agents, vendors] = await Promise.all([
+        const [
+            // 1. User Stats
+            totalUsers,
+            males,
+            females,
+            blockedUsers,
+            pendingUserApprovals,
+            
+            // 2. Referral Tracking (New)
+            totalReferredUsers, // Users who signed up via an Agent
+
+            // 3. Action Queue (Things you need to verify)
+            pendingRegPayments, // Membership payments waiting for UTR check
+            pendingIntPayments, // Contact payments waiting for UTR check
+            pendingIntContent,  // Messages waiting for content moderation
+            
+            // 4. Platform Health
+            totalAgents,
+            totalVendors,
+            totalInterests,
+            acceptedInterests
+        ] = await Promise.all([
+            // User Counts
             User.countDocuments({}),
             User.countDocuments({ gender: 'Male' }),
             User.countDocuments({ gender: 'Female' }),
-            User.countDocuments({ isPaidMember: true }),
+            User.countDocuments({ isActive: false }),
             User.countDocuments({ isApproved: false }),
+
+            // REFERRAL TRACKING: Count users where 'referredByAgentId' is NOT null
+            User.countDocuments({ referredByAgentId: { $ne: null } }),
+
+            // Action Queue
+            PaymentRegistration.countDocuments({ status: 'PendingVerification' }),
+            PaymentInterest.countDocuments({ status: 'PendingPaymentVerification' }),
+            Interest.countDocuments({ status: 'PendingAdmin' }),
+
+            // General Counts
             Agent.countDocuments({}),
-            Vendor.countDocuments({})
+            Vendor.countDocuments({}),
+            Interest.countDocuments({}),
+            Interest.countDocuments({ status: 'Accepted' })
         ]);
-        res.json({ success: true, stats: { users, males, females, paid, pending, agents, vendors } });
-    } catch (e) { res.status(500).json({ success: false }); }
+
+        res.json({
+            success: true,
+            stats: {
+                users: {
+                    total: totalUsers,
+                    males,
+                    females,
+                    blocked: blockedUsers,
+                },
+                referrals: {
+                    totalAgents: totalAgents,
+                    totalReferredUsers: totalReferredUsers, // How many users agents brought in
+                },
+                actionQueue: {
+                    pendingUserApprovals,           // Profiles waiting to be approved
+                    pendingRegistrationPayments: pendingRegPayments, // Memberships to Verify
+                    pendingInterestPayments: pendingIntPayments,     // Contact Requests to Verify
+                    pendingInterestContent: pendingIntContent        // Messages to Approve
+                },
+                platformHealth: {
+                    totalVendors,
+                    totalInterestsSent: totalInterests,
+                    successfulMatches: acceptedInterests
+                }
+            }
+        });
+
+    } catch (e) {
+        console.error("Stats Error:", e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
 });
+
+
+
+
 
 app.get("/api/admin/users", verifyAdmin, async (req, res) => {
     const users = await User.find().sort({ createdAt: -1 });
