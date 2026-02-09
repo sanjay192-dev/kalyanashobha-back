@@ -466,6 +466,28 @@ app.post("/api/user/upload-photos", verifyUser, uploadProfile.array("photos", 5)
 
 
 
+// ===================== CHECK IF USER UPLOADED PHOTOS =====================
+
+app.get("/api/user/photos-status", verifyUser, async (req, res) => {
+    try {
+        const user = await User.findById(req.userId).select("photos");
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        const hasPhotos = user.photos && user.photos.length > 0;
+
+        res.json({
+            success: true,
+            hasPhotos: hasPhotos  // true if photos exist, false otherwise
+        });
+
+    } catch (err) {
+        console.error("Photo Status Error:", err);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
 
 
 
