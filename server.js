@@ -173,7 +173,7 @@ app.post("/api/admin/seed", async (req, res) => {
         const hashedPassword = await bcrypt.hash("admin123", salt);
 
         const admin = new Admin({
-            username: "SuperAdmin", email: "admin@kalyanashobha.com",
+            username: "SuperAdmin", email: "adepusanjay444@gmail.com",
             password: hashedPassword, role: "SuperAdmin"
         });
         await admin.save();
