@@ -980,27 +980,92 @@ app.post("/api/admin/users/search-advanced", verifyAdmin, async (req, res) => {
 
 
 
+// ====================================================================
+// G. AGENT MANAGEMENT (Refined)
+// ====================================================================
 
-
-
-
-
-
+// 1. Create Agent (With Password Hash & Code Gen)
 app.post("/api/admin/agents", verifyAdmin, async (req, res) => {
     try {
-        const agent = new Agent(req.body);
+        const { name, mobile, email, password } = req.body;
+
+        // Check duplicates
+        const existing = await Agent.findOne({ $or: [{ email }, { mobile }] });
+        if (existing) return res.status(400).json({ success: false, message: "Agent exists with this email/mobile" });
+
+        // Hash Password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // Generate Unique Agent Code (e.g., AGT-8392)
+        const agentCode = `AGT-${Math.floor(1000 + Math.random() * 9000)}`;
+
+        const agent = new Agent({
+            name, mobile, email, 
+            password: hashedPassword, 
+            agentCode,
+            isActive: true
+        });
+
         await agent.save();
-        res.json({ success: true, agent });
-    } catch (e) { res.status(500).json({ success: false }); }
+        res.json({ success: true, message: "Agent created", agent });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
 });
-app.delete("/api/admin/agents/:id", verifyAdmin, async (req, res) => {
-    await Agent.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
-});
+
+// 2. Get All Agents (With Referral Counts)
 app.get("/api/admin/agents", verifyAdmin, async (req, res) => {
-    const agents = await Agent.find();
-    res.json({ success: true, agents });
+    try {
+        const agents = await Agent.find().sort({ createdAt: -1 });
+        
+        // Calculate referral counts for each agent
+        const agentsWithStats = await Promise.all(agents.map(async (agent) => {
+            const count = await User.countDocuments({ referredByAgentId: agent._id });
+            return { ...agent.toObject(), referralCount: count };
+        }));
+
+        res.json({ success: true, agents: agentsWithStats });
+    } catch (e) {
+        res.status(500).json({ success: false });
+    }
 });
+
+// 3. Get Single Agent + Their Referred Users
+app.get("/api/admin/agents/:id/details", verifyAdmin, async (req, res) => {
+    try {
+        const agent = await Agent.findById(req.params.id);
+        if(!agent) return res.status(404).json({success: false, message: "Agent not found"});
+
+        // Fetch users referred by this agent
+        const referredUsers = await User.find({ referredByAgentId: agent._id })
+            .select('firstName lastName uniqueId mobileNumber email isPaidMember createdAt')
+            .sort({ createdAt: -1 });
+
+        res.json({ success: true, agent, users: referredUsers });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// 4. Delete Agent
+app.delete("/api/admin/agents/:id", verifyAdmin, async (req, res) => {
+    try {
+        await Agent.findByIdAndDelete(req.params.id);
+        // Optional: You might want to nullify the referredByAgentId in users, 
+        // but keeping it for history is usually better.
+        res.json({ success: true, message: "Agent deleted" });
+    } catch (e) {
+        res.status(500).json({ success: false });
+    }
+});
+
+
+
+
+
+
+
 
 app.post("/api/admin/vendors", verifyAdmin, uploadVendor.array("images", 3), async (req, res) => {
     try {
