@@ -1052,6 +1052,60 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
 
 
 
+
+// ====================================================================
+// NEW: GET Pending Interest Requests (For Admin List)
+// ====================================================================
+
+app.get("/api/admin/interest/requests", verifyAdmin, async (req, res) => {
+    try {
+        const { status } = req.query; // e.g., 'PendingPaymentVerification'
+
+        let query = {};
+        if (status) {
+            query.status = status;
+        }
+
+        // 1. Find Payments based on status
+        const payments = await PaymentInterest.find(query)
+            .populate('senderId', 'firstName lastName uniqueId')
+            .populate('receiverId', 'firstName lastName uniqueId')
+            .sort({ date: -1 });
+
+        // 2. We also need the 'interestId' for the second API call.
+        // We map over payments and find the related Interest document.
+        const combinedData = await Promise.all(payments.map(async (pay) => {
+            const interest = await Interest.findOne({ paymentId: pay._id });
+            return {
+                _id: pay._id,                // Payment ID
+                interestId: interest?._id,   // Interest ID (Needed for Step 2)
+                amount: pay.amount,
+                utrNumber: pay.utrNumber,
+                screenshotUrl: pay.screenshotUrl,
+                status: pay.status,
+                date: pay.date,
+                sender: pay.senderId,
+                receiver: pay.receiverId
+            };
+        }));
+
+        res.json({ success: true, data: combinedData });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+
+
+
+
+
+
+
+
+
 // ====================================================================
 // NEW: GET Payment Registrations (For Admin List)
 // ====================================================================
