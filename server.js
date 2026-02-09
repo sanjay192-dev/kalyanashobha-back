@@ -1050,6 +1050,36 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
 });
 
 
+
+
+// ====================================================================
+// NEW: GET Payment Registrations (For Admin List)
+// ====================================================================
+
+app.get("/api/admin/payment/registrations", verifyAdmin, async (req, res) => {
+    try {
+        const { status } = req.query;
+        
+        // Build query based on status (PendingVerification, Success, Rejected)
+        // If no status provided, default to all or handle on frontend
+        let query = {};
+        if (status) {
+            query.status = status;
+        }
+
+        const payments = await PaymentRegistration.find(query)
+            .populate('userId', 'firstName lastName uniqueId mobileNumber email') // Get User Details
+            .sort({ date: -1 }); // Newest first
+
+        res.json({ success: true, count: payments.length, payments });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+
 // 2. Admin Verify Registration
 app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res) => {
     try {
