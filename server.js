@@ -160,6 +160,10 @@ const verifyUser = (req, res, next) => {
 // A. ADMIN AUTHENTICATION
 // ====================================================================
 
+// ====================================================================
+// A. ADMIN AUTHENTICATION (UPDATED: With OTP)
+// ====================================================================
+
 app.post("/api/admin/seed", async (req, res) => {
     try {
         const existingAdmin = await Admin.findOne({ email: "admin@kalyanashobha.com" });
@@ -177,18 +181,78 @@ app.post("/api/admin/seed", async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-app.post("/api/admin/auth/login", async (req, res) => {
+// --- STEP 1: Validate Password & Send OTP ---
+app.post("/api/admin/auth/login-init", async (req, res) => {
     try {
         const { email, password } = req.body;
+        
+        // 1. Check Admin existence
         const admin = await Admin.findOne({ email });
         if (!admin) return res.status(404).json({ success: false, message: "Admin not found" });
 
+        // 2. Check Password
         const isMatch = await bcrypt.compare(password, admin.password);
         if (!isMatch) return res.status(400).json({ success: false, message: "Invalid credentials" });
 
-        const token = jwt.sign({ id: admin._id, role: admin.role }, process.env.JWT_SECRET || "fallback_secret_key", { expiresIn: "1d" });
-        res.json({ success: true, token, admin: { username: admin.username, email: admin.email, role: admin.role } });
-    } catch (e) { res.status(500).json({ success: false, message: "Server Error" }); }
+        // 3. Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000);
+        otpStore[email] = otp;
+
+        // Auto-expire OTP after 5 minutes
+        setTimeout(() => delete otpStore[email], 300000); 
+
+        // 4. Send Email
+        const emailContent = generateEmailTemplate(
+            "Admin Dashboard Access",
+            `<p>A login attempt was made for the Admin Panel.</p>
+             <p>Your Verification Code is:</p>
+             <h2 style="color: #c0392b; letter-spacing: 5px; font-weight: bold;">${otp}</h2>
+             <p>This code is valid for 5 minutes. If this wasn't you, please change your password immediately.</p>`
+        );
+
+        await sendMail({ to: email, subject: "Admin Login Verification", html: emailContent });
+
+        res.json({ success: true, message: "OTP sent to registered admin email." });
+
+    } catch (e) { 
+        console.error(e);
+        res.status(500).json({ success: false, message: "Server Error" }); 
+    }
+});
+
+// --- STEP 2: Verify OTP & Issue Token ---
+app.post("/api/admin/auth/login-verify", async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+
+        // 1. Validate OTP
+        if (otpStore[email] && parseInt(otpStore[email]) === parseInt(otp)) {
+            
+            // 2. Get Admin Details
+            const admin = await Admin.findOne({ email });
+            
+            // 3. Clear OTP to prevent reuse
+            delete otpStore[email]; 
+
+            // 4. Generate Token
+            const token = jwt.sign(
+                { id: admin._id, role: admin.role }, 
+                process.env.JWT_SECRET || "fallback_secret_key", 
+                { expiresIn: "1d" }
+            );
+
+            res.json({ 
+                success: true, 
+                token, 
+                admin: { username: admin.username, email: admin.email, role: admin.role } 
+            });
+
+        } else {
+            res.status(400).json({ success: false, message: "Invalid or Expired OTP" });
+        }
+    } catch (e) { 
+        res.status(500).json({ success: false, message: "Server Error" }); 
+    }
 });
 
 app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
