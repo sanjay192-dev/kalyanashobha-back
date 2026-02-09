@@ -24,15 +24,9 @@ app.use(cors());
 app.use(express.json());
 
 // ---------------- DB CONNECTION ----------------
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 50000,
-  socketTimeoutMS: 45000,
-})
-.then(() => console.log("MongoDB Connected"))
-.catch(err => console.error("MongoDB Error:", err));
-
+mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log("MongoDB Connected"))
+    .catch(err => console.error("MongoDB Error:", err));
 
 // ---------------- CLOUDINARY CONFIG ----------------
 cloudinary.config({
