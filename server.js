@@ -748,96 +748,91 @@ app.post("/api/users/search", async (req, res) => {
 // F. USER DASHBOARD (SMART MATCHES: Age + Community + Marital Status)
 // ====================================================================
 
+// ====================================================================
+// F. USER DASHBOARD (SMART MATCHES WITH STATUS)
+// ====================================================================
+
 app.get("/api/user/dashboard-matches", verifyUser, async (req, res) => {
     try {
-        // 1. Get Logged-in User
         const currentUser = await User.findById(req.userId);
         if (!currentUser) return res.status(404).json({ success: false, message: "User not found" });
 
-        // --- NEW LOGIC START: FETCH INTERACTED USERS ---
-        // Find all interests where I am the Sender OR the Receiver
-        // This covers: Pending, Accepted, Rejected, Declined
+        // 1. Fetch ALL interactions (Sent or Received)
         const interactions = await Interest.find({
             $or: [
                 { senderId: req.userId }, 
                 { receiverId: req.userId }
             ]
-        }).select('senderId receiverId');
+        });
 
-        // Create an array of IDs to exclude
-        // If I am the sender, exclude the receiver. If I am the receiver, exclude the sender.
-        const excludedIds = interactions.map(inter => 
-            inter.senderId.toString() === req.userId.toString() 
+        // 2. Create a Map for quick lookup:  UserID -> Status
+        // Example: { "65df...": "PendingPaymentVerification", "65da...": "Accepted" }
+        const statusMap = {};
+        interactions.forEach(inter => {
+            const otherId = inter.senderId.toString() === req.userId.toString() 
                 ? inter.receiverId.toString() 
-                : inter.senderId.toString()
-        );
+                : inter.senderId.toString();
+            
+            statusMap[otherId] = inter.status;
+        });
 
-        // Also exclude my own ID
-        excludedIds.push(req.userId);
-        // --- NEW LOGIC END ---
-
-        // 2. Determine Limits (Paid vs Free)
+        // 3. Define Limits
         const isPremium = currentUser.isApproved && currentUser.isPaidMember;
-        const profileLimit = isPremium ? 50 : 2;
+        const profileLimit = isPremium ? 50 : 10; // Give free users some matches to see status
 
-        // 3. Basic Filters
+        // 4. Build Query
         const targetGender = currentUser.gender === 'Male' ? 'Female' : 'Male';
-
         let query = {
             gender: targetGender,
             isApproved: true,
             isActive: true,
-            _id: { $nin: excludedIds } // <--- KEY CHANGE: Exclude everyone in the list
+            _id: { $ne: req.userId } // Only exclude myself
         };
 
-        // --- FILTER 1: COMMUNITY (Strict) ---
-        if (currentUser.caste) {
-            query.caste = currentUser.caste;
-        }
+        // --- FILTER 1: COMMUNITY ---
+        if (currentUser.caste) query.caste = currentUser.caste;
 
-        // --- FILTER 2: MARITAL STATUS (Logic) ---
+        // --- FILTER 2: MARITAL STATUS ---
         if (currentUser.maritalStatus === 'Never Married') {
             query.maritalStatus = 'Never Married';
         } else {
             query.maritalStatus = { $in: ['Divorced', 'Widowed', 'Awaiting Divorce'] };
         }
 
-        // --- FILTER 3: AGE (Date of Birth) ---
+        // --- FILTER 3: AGE ---
         if (currentUser.dob) {
             const userDob = new Date(currentUser.dob);
             const userYear = userDob.getFullYear();
             const today = new Date();
             const currentYear = today.getFullYear();
-
             let minAge, maxAge;
 
             if (currentUser.gender === 'Male') {
                 const myAge = currentYear - userYear;
-                minAge = myAge - 5; 
-                maxAge = myAge;     
+                minAge = myAge - 5; maxAge = myAge;     
             } else {
                 const myAge = currentYear - userYear;
-                minAge = myAge;     
-                maxAge = myAge + 5; 
+                minAge = myAge; maxAge = myAge + 5; 
             }
-
             const minDobDate = new Date(currentYear - maxAge, 0, 1); 
             const maxDobDate = new Date(currentYear - minAge, 11, 31); 
-
             query.dob = { $gte: minDobDate, $lte: maxDobDate };
         }
 
-        // 4. Fetch & Limit
+        // 5. Fetch Profiles
         const matches = await User.find(query)
             .select('firstName lastName dob caste highestQualification jobRole maritalStatus photos city state')
             .limit(profileLimit);
 
-        // 5. Format Output
+        // 6. Format Output & ATTACH STATUS
         const formattedMatches = matches.map(profile => {
             const dob = new Date(profile.dob);
             const ageDiffMs = Date.now() - dob.getTime();
             const ageDate = new Date(ageDiffMs);
             const age = Math.abs(ageDate.getUTCFullYear() - 1970);
+
+            // LOOKUP STATUS
+            const status = statusMap[profile._id.toString()] || null;
 
             return {
                 id: profile._id,
@@ -848,7 +843,10 @@ app.get("/api/user/dashboard-matches", verifyUser, async (req, res) => {
                 job: profile.jobRole,
                 maritalStatus: profile.maritalStatus,
                 photo: profile.photos.length > 0 ? profile.photos[0] : null,
-                location: `${profile.city}, ${profile.state}`
+                location: `${profile.city}, ${profile.state}`,
+                
+                // *** THIS IS THE NEW FIELD ***
+                interestStatus: status 
             };
         });
 
@@ -864,11 +862,7 @@ app.get("/api/user/dashboard-matches", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Error fetching matches" });
     }
 });
-
-
-
-
-
+ 
 
 // ====================================================================
 // D. ADMIN DASHBOARD & MANAGEMENT (SECURE)
