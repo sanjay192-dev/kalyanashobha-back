@@ -1911,9 +1911,7 @@ app.delete("/api/admin/users/:id", verifyAdmin, async (req, res) => {
     }
 });
 
-
-
-        // ====================================================================
+// ====================================================================
 // I. AGENT DASHBOARD OPERATIONS (FIXED)
 // ====================================================================
 
@@ -2099,8 +2097,7 @@ app.get("/api/agent/payments/interests", verifyAgent, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-    
-
+                                                
 
 
 const PORT = process.env.PORT || 5000;
