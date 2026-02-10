@@ -146,15 +146,75 @@ async function sendMail({ to, subject, html }) {
     }
 }
 
-// ---------------- ID GENERATOR ----------------
-async function generateUserId(state) {
-    let code = "IN";
-    if (state && state.toLowerCase() === "telangana") code = "TG";
-    if (state && state.toLowerCase() === "maharashtra") code = "MAR";
-    const count = await User.countDocuments({ state });
-    return `${code}-${String(count + 1).padStart(5, '0')}`;
-}
+// ---------------- INDIA STATE CODES ----------------
 
+const stateCodeMap = {
+    "andhra pradesh": "AP",
+    "arunachal pradesh": "AR",
+    "assam": "AS",
+    "bihar": "BR",
+    "chhattisgarh": "CG",
+    "goa": "GA",
+    "gujarat": "GJ",
+    "haryana": "HR",
+    "himachal pradesh": "HP",
+    "jharkhand": "JH",
+    "karnataka": "KA",
+    "kerala": "KL",
+    "madhya pradesh": "MP",
+    "maharashtra": "MH",
+    "manipur": "MN",
+    "meghalaya": "ML",
+    "mizoram": "MZ",
+    "nagaland": "NL",
+    "odisha": "OD",
+    "punjab": "PB",
+    "rajasthan": "RJ",
+    "sikkim": "SK",
+    "tamil nadu": "TN",
+    "telangana": "TG",
+    "tripura": "TR",
+    "uttar pradesh": "UP",
+    "uttarakhand": "UK",
+    "west bengal": "WB",
+
+    // Union Territories
+    "andaman and nicobar islands": "AN",
+    "chandigarh": "CH",
+    "dadra and nagar haveli": "DN",
+    "daman and diu": "DD",
+    "delhi": "DL",
+    "jammu and kashmir": "JK",
+    "ladakh": "LA",
+    "puducherry": "PY"
+};
+
+
+// ---------------- USER ID GENERATOR ----------------
+
+async function generateUserId(state) {
+    if (!state) state = "India";
+
+    // Convert to lowercase for lookup
+    const key = state.toLowerCase().trim();
+
+    // Get prefix safely
+    let prefix = stateCodeMap[key] || "IN";
+
+    // Find last user with this prefix
+    const lastUser = await User.findOne({
+        uniqueId: { $regex: `^${prefix}-` }
+    }).sort({ uniqueId: -1 });
+
+    let nextNumber = 1;
+
+    if (lastUser) {
+        const lastNum = parseInt(lastUser.uniqueId.split("-")[1]);
+        nextNumber = lastNum + 1;
+    }
+
+    return `${prefix}-${String(nextNumber).padStart(5, "0")}`;
+}
 // ---------------- MIDDLEWARE: SECURITY ----------------
 
 const verifyAdmin = (req, res, next) => {
