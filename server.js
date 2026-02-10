@@ -1415,14 +1415,45 @@ app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res)
 
 
 
-// 3. Submit Interest (User) - Both User and Admin receive emails
+// 3. Submit Interest (User) - UPDATED WITH DUPLICATE CHECK
 app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screenshot"), async (req, res) => {
     try {
         const { receiverId, amount, utrNumber } = req.body;
 
+        // --- NEW LOGIC START: DUPLICATE CHECK ---
+        // Check if an interest request already exists for this pair
+        // We look for any status EXCEPT 'Rejected'. 
+        // (If it was Rejected by admin previously, we allow them to try again).
+        const existingInterest = await Interest.findOne({
+            senderId: req.userId,
+            receiverId: receiverId,
+            status: { $ne: 'Rejected' } 
+        });
+
+        if (existingInterest) {
+            // Delete the uploaded file to save cloud storage space since we are rejecting the request
+            if (req.file) {
+                await cloudinary.uploader.destroy(req.file.filename);
+            }
+
+            let msg = "Request already exists.";
+            if (existingInterest.status === 'Accepted') msg = "You are already connected with this user.";
+            if (existingInterest.status === 'Declined') msg = "This user has previously declined your request.";
+            if (existingInterest.status.includes('Pending')) msg = "A request is already pending verification or approval.";
+
+            return res.json({ 
+                success: false, 
+                message: msg, 
+                currentStatus: existingInterest.status 
+            });
+        }
+        // --- NEW LOGIC END ---
+
         // 1. Fetch user details for the email
         const user = await User.findById(req.userId);
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        if (!req.file) return res.status(400).json({ success: false, message: "Screenshot required" });
 
         // 2. Save Payment Record
         const payment = new PaymentInterest({
@@ -1446,7 +1477,7 @@ app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screens
         // 4. Send Email to SENDER (Acknowledgment)
         const userEmailContent = generateEmailTemplate(
             "Interest Request Received",
-            `<p>Dear ${user.username},</p>
+            `<p>Dear ${user.firstName},</p>
              <p>We have received your interest request and the payment proof of <strong>Rs. ${amount}</strong>.</p>
              <p>Our administration team is currently verifying the transaction details (UTR: ${utrNumber}). Once verified, your interest will be forwarded to the recipient.</p>
              <p>Status: Payment Verification Pending</p>`
@@ -1461,7 +1492,7 @@ app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screens
         const adminEmailContent = generateEmailTemplate(
             "Action Required: New Interest Payment",
             `<p>A new interest payment has been submitted for verification.</p>
-             <p><strong>Sender ID:</strong> ${user.uniqueId}<br>
+             <p><strong>Sender:</strong> ${user.firstName} (${user.uniqueId})<br>
                 <strong>UTR Number:</strong> ${utrNumber}<br>
                 <strong>Amount:</strong> Rs. ${amount}</p>
              <p>Please log in to the Admin Dashboard to verify the screenshot and approve the request.</p>`
@@ -1479,6 +1510,7 @@ app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screens
         return res.status(500).json({ success: false, error: e.message });
     }
 });
+
 
 // 4. Admin Verify Interest Payment
 app.post("/api/admin/payment/interest/verify", verifyAdmin, async (req, res) => {
