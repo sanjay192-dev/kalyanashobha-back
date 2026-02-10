@@ -1913,23 +1913,19 @@ app.delete("/api/admin/users/:id", verifyAdmin, async (req, res) => {
 
 
 
-
+        // ====================================================================
+// I. AGENT DASHBOARD OPERATIONS (FIXED)
 // ====================================================================
-// I. AGENT DASHBOARD OPERATIONS
-// ====================================================================
 
-// 1. Get Agent Dashboard Stats (Users, Earnings, etc.)
+// 1. Get Agent Dashboard Stats
 app.get("/api/agent/dashboard/stats", verifyAgent, async (req, res) => {
     try {
         // Find users referred by THIS agent
         const myUsers = await User.find({ referredByAgentId: req.agentId });
-        const myUserIds = myUsers.map(u => u._id);
-
+        
         // Calculate Stats
         const totalReferrals = myUsers.length;
         const paidReferrals = myUsers.filter(u => u.isPaidMember).length;
-        
-        // Count Pending Approvals for my users
         const pendingApprovals = myUsers.filter(u => !u.isApproved).length;
 
         res.json({
@@ -1941,15 +1937,16 @@ app.get("/api/agent/dashboard/stats", verifyAgent, async (req, res) => {
             }
         });
     } catch (e) {
+        console.error(e);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
 
-// 2. Get "My Users" List (Only users referred by this Agent)
+// 2. Get "My Users" List
 app.get("/api/agent/users", verifyAgent, async (req, res) => {
     try {
         const users = await User.find({ referredByAgentId: req.agentId })
-            .select('-password -otp')
+            .select('-password -otp') // Exclude sensitive info
             .sort({ createdAt: -1 });
             
         res.json({ success: true, count: users.length, users });
@@ -1958,52 +1955,99 @@ app.get("/api/agent/users", verifyAgent, async (req, res) => {
     }
 });
 
-// 3. Register a User (Manual Entry by Agent)
-// This is used when Agent manually fills the form for a user
+// 3. Register a User (Manual Entry by Agent) - *** FIXED ENUM & FIELDS ***
 app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
     try {
-        const data = req.body; // Contains user details
+        const data = req.body; 
         const agent = await Agent.findById(req.agentId);
 
-        // 1. Force the referral fields
-        const userData = {
-            ...data,
+        if (!agent) {
+            return res.status(404).json({ success: false, message: "Agent not found" });
+        }
+
+        // 1. Check if user already exists
+        const existingUser = await User.findOne({ 
+            $or: [{ email: data.email }, { mobileNumber: data.mobileNumber }] 
+        });
+        
+        if (existingUser) {
+            return res.status(400).json({ success: false, message: "User with this Email or Mobile already exists" });
+        }
+
+        // 2. Prepare Data
+        const uniqueId = await generateUserId(data.state); // Generates ID based on State
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(data.password, salt);
+
+        // 3. Create User Object (Mapping ALL fields explicitly to ensure safety)
+        const user = new User({
+            // --- Basic Fields ---
+            profileFor: data.profileFor,
+            gender: data.gender,
+            firstName: data.firstName,
+            lastName: data.lastName,
+            dob: data.dob,
+            
+            // --- Religion & Community ---
+            religion: data.religion,
+            community: data.community, // React frontend sends 'caste' as 'community'
+            caste: data.caste,         // Optional sub-caste
+            subCommunity: data.subCommunity,
+
+            // --- Location ---
+            country: data.country,
+            state: data.state,
+            city: data.city,
+
+            // --- Personal ---
+            maritalStatus: data.maritalStatus,
+            height: data.height, // Ensure this is a number in frontend
+            diet: data.diet,
+
+            // --- Education & Work (Previously Missing) ---
+            highestQualification: data.highestQualification,
+            collegeName: data.collegeName,
+            workType: data.workType, // 'Private', 'Govt', etc.
+            jobRole: data.jobRole,
+            companyName: data.companyName,
+            annualIncome: data.annualIncome,
+
+            // --- Contact & Auth ---
+            email: data.email,
+            mobileNumber: data.mobileNumber,
+            password: hashedPassword,
+            
+            // --- System Fields ---
+            uniqueId: uniqueId,
+            isActive: true, // Agent created profiles are active by default (but might need approval)
+            isApproved: false, // Still needs Admin Approval
+            isPaidMember: false,
+
+            // --- REFERRAL LINKING (FIXED ENUM) ---
             referredByAgentId: agent._id,
             referredByAgentName: agent.name,
-            referralType: "manual_entry" // Or 'agent_portal'
-        };
-
-        // 2. Standard Registration Logic
-        const existingUser = await User.findOne({ email: userData.email });
-        if (existingUser) return res.status(400).json({ success: false, message: "User already exists" });
-
-        const uniqueId = await generateUserId(userData.state);
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(userData.password, salt);
-
-        const user = new User({
-            ...userData,
-            password: hashedPassword,
-            uniqueId,
-            isActive: true
+            referralType: 'manual' // FIXED: Was 'manual_entry', causing the error
         });
 
+        // 4. Save to DB
         await user.save();
 
-        // 3. Email User
+        // 5. Send Welcome Email
         const userWelcomeContent = generateEmailTemplate(
             "Welcome to KalyanaShobha",
             `<p>Dear ${user.firstName},</p>
              <p>Your profile has been created by our agent <strong>${agent.name}</strong>.</p>
              <p><strong>Profile ID:</strong> ${user.uniqueId}</p>
-             <p><strong>Password:</strong> ${userData.password}</p>
-             <p>Please login and change your password.</p>`
+             <p><strong>Login Password:</strong> ${data.password}</p>
+             <p>Please login to your dashboard to view matches.</p>`
         );
         sendMail({ to: user.email, subject: "Profile Created via Agent", html: userWelcomeContent });
 
         res.json({ success: true, message: "User registered successfully under your referral." });
 
     } catch (e) {
+        console.error("Agent Reg Error:", e);
+        // Return the specific error message (like Validation failed)
         res.status(500).json({ success: false, message: e.message });
     }
 });
@@ -2011,17 +2055,22 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
 // 4. View Membership Payments (Only for My Users)
 app.get("/api/agent/payments/registrations", verifyAgent, async (req, res) => {
     try {
-        // 1. Get IDs of my users
+        // 1. Get IDs of users referred by this agent
         const myUsers = await User.find({ referredByAgentId: req.agentId }).select('_id');
         const userIds = myUsers.map(u => u._id);
 
-        // 2. Find payments where userId is in that list
+        if (userIds.length === 0) {
+            return res.json({ success: true, count: 0, payments: [] });
+        }
+
+        // 2. Find payments made by these users
         const payments = await PaymentRegistration.find({ userId: { $in: userIds } })
-            .populate('userId', 'firstName lastName uniqueId mobileNumber')
+            .populate('userId', 'firstName lastName uniqueId mobileNumber') // Show User Details
             .sort({ date: -1 });
 
         res.json({ success: true, count: payments.length, payments });
     } catch (e) {
+        console.error(e);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
@@ -2029,22 +2078,28 @@ app.get("/api/agent/payments/registrations", verifyAgent, async (req, res) => {
 // 5. View Interest Payments/Activities (Only for My Users)
 app.get("/api/agent/payments/interests", verifyAgent, async (req, res) => {
     try {
-        // 1. Get IDs of my users
+        // 1. Get IDs of users referred by this agent
         const myUsers = await User.find({ referredByAgentId: req.agentId }).select('_id');
         const userIds = myUsers.map(u => u._id);
 
-        // 2. Find interest payments where SENDER is one of my users
+        if (userIds.length === 0) {
+            return res.json({ success: true, count: 0, payments: [] });
+        }
+
+        // 2. Find Interest Payments where the SENDER is one of the agent's users
+        // This shows money spent by the Agent's clients
         const payments = await PaymentInterest.find({ senderId: { $in: userIds } })
-            .populate('senderId', 'firstName lastName uniqueId')
-            .populate('receiverId', 'firstName lastName uniqueId') // Show who they paid for
+            .populate('senderId', 'firstName lastName uniqueId')   // My User
+            .populate('receiverId', 'firstName lastName uniqueId') // Who they want to contact
             .sort({ date: -1 });
 
         res.json({ success: true, count: payments.length, payments });
     } catch (e) {
+        console.error(e);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-
+    
 
 
 
