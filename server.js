@@ -35,7 +35,7 @@ const connectDB = async () => {
     // 2. If not, connect now
     try {
         await mongoose.connect(process.env.MONGO_URI, {
-            dbName: "matrimony_db", // Optional: explicit DB name
+            dbName: "kalyanashobha", // Optional: explicit DB name
             serverSelectionTimeoutMS: 5000, // Timeout after 5s if DB is unreachable
             socketTimeoutMS: 45000, // Close sockets after 45s
         });
