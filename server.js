@@ -23,10 +23,41 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ---------------- DB CONNECTION ----------------
-mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log("MongoDB Connected"))
-    .catch(err => console.error("MongoDB Error:", err));
+
+let isConnected = false; // Track connection status
+
+const connectDB = async () => {
+    // 1. If already connected, use existing connection
+    if (mongoose.connection.readyState >= 1) {
+        return;
+    }
+
+    // 2. If not, connect now
+    try {
+        await mongoose.connect(process.env.MONGO_URI, {
+            dbName: "matrimony_db", // Optional: explicit DB name
+            serverSelectionTimeoutMS: 5000, // Timeout after 5s if DB is unreachable
+            socketTimeoutMS: 45000, // Close sockets after 45s
+        });
+        isConnected = true;
+        console.log("MongoDB Connected (New Connection)");
+    } catch (error) {
+        console.error("MongoDB Connection Failed:", error);
+        // We do NOT exit the process here, so the server stays alive for retry
+    }
+};
+
+// 3. MIDDLEWARE: Ensure DB is connected BEFORE every request
+app.use(async (req, res, next) => {
+    await connectDB();
+    next();
+});
+
+
+
+
+
+
 
 // ---------------- CLOUDINARY CONFIG ----------------
 cloudinary.config({
