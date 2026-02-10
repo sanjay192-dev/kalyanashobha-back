@@ -247,9 +247,98 @@ const verifyUser = (req, res, next) => {
     }
 };
 
+
+const verifyAgent = (req, res, next) => {
+    const token = req.headers['authorization'];
+    if (!token) return res.status(403).json({ success: false, message: "No token provided" });
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || "fallback_secret_key");
+        // Check if the token belongs to an Agent (you might want to add a role in the token payload)
+        // For now, we assume if it decodes and has an ID, we check the Agent collection
+        req.agentId = decoded.id;
+        next();
+    } catch (err) {
+        return res.status(401).json({ success: false, message: "Unauthorized Agent" });
+    }
+};
+
+
+
+
 // ====================================================================
-// A. ADMIN AUTHENTICATION
+// H. AGENT AUTHENTICATION (Login with OTP)
 // ====================================================================
+
+// 1. Agent Login Init (Password Check -> Send OTP)
+app.post("/api/agent/auth/login-init", async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        // 1. Find Agent
+        const agent = await Agent.findOne({ email, isActive: true });
+        if (!agent) return res.status(404).json({ success: false, message: "Agent not found or inactive" });
+
+        // 2. Validate Password
+        const isMatch = await bcrypt.compare(password, agent.password);
+        if (!isMatch) return res.status(400).json({ success: false, message: "Invalid credentials" });
+
+        // 3. Generate OTP
+        const otp = Math.floor(100000 + Math.random() * 900000);
+        otpStore[email] = otp; // Reusing your existing otpStore object
+        setTimeout(() => delete otpStore[email], 300000); // 5 mins expiry
+
+        // 4. Send Email
+        const emailContent = generateEmailTemplate(
+            "Agent Dashboard Access",
+            `<p>Hello ${agent.name},</p>
+             <p>Your OTP for Agent Dashboard login is:</p>
+             <h2 style="color: #2c3e50; letter-spacing: 5px;">${otp}</h2>`
+        );
+        await sendMail({ to: email, subject: "Agent Login OTP", html: emailContent });
+
+        res.json({ success: true, message: "OTP sent to email" });
+
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// 2. Agent Login Verify (Verify OTP -> Return Token & Details)
+app.post("/api/agent/auth/login-verify", async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+
+        if (otpStore[email] && parseInt(otpStore[email]) === parseInt(otp)) {
+            const agent = await Agent.findOne({ email });
+            delete otpStore[email];
+
+            const token = jwt.sign(
+                { id: agent._id, role: 'Agent' }, 
+                process.env.JWT_SECRET || "fallback_secret_key", 
+                { expiresIn: "1d" }
+            );
+
+            // Return Agent Info (Include ID and Name for the Referral Link logic)
+            res.json({ 
+                success: true, 
+                token, 
+                agent: {
+                    id: agent._id,
+                    name: agent.name,
+                    email: agent.email,
+                    mobile: agent.mobile,
+                    agentCode: agent.agentCode
+                }
+            });
+        } else {
+            res.status(400).json({ success: false, message: "Invalid or Expired OTP" });
+        }
+    } catch (e) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
 
 // ====================================================================
 // A. ADMIN AUTHENTICATION (UPDATED: With OTP)
@@ -1821,6 +1910,141 @@ app.delete("/api/admin/users/:id", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+
+
+
+
+// ====================================================================
+// I. AGENT DASHBOARD OPERATIONS
+// ====================================================================
+
+// 1. Get Agent Dashboard Stats (Users, Earnings, etc.)
+app.get("/api/agent/dashboard/stats", verifyAgent, async (req, res) => {
+    try {
+        // Find users referred by THIS agent
+        const myUsers = await User.find({ referredByAgentId: req.agentId });
+        const myUserIds = myUsers.map(u => u._id);
+
+        // Calculate Stats
+        const totalReferrals = myUsers.length;
+        const paidReferrals = myUsers.filter(u => u.isPaidMember).length;
+        
+        // Count Pending Approvals for my users
+        const pendingApprovals = myUsers.filter(u => !u.isApproved).length;
+
+        res.json({
+            success: true,
+            stats: {
+                totalReferrals,
+                paidReferrals,
+                pendingApprovals
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// 2. Get "My Users" List (Only users referred by this Agent)
+app.get("/api/agent/users", verifyAgent, async (req, res) => {
+    try {
+        const users = await User.find({ referredByAgentId: req.agentId })
+            .select('-password -otp')
+            .sort({ createdAt: -1 });
+            
+        res.json({ success: true, count: users.length, users });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// 3. Register a User (Manual Entry by Agent)
+// This is used when Agent manually fills the form for a user
+app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
+    try {
+        const data = req.body; // Contains user details
+        const agent = await Agent.findById(req.agentId);
+
+        // 1. Force the referral fields
+        const userData = {
+            ...data,
+            referredByAgentId: agent._id,
+            referredByAgentName: agent.name,
+            referralType: "manual_entry" // Or 'agent_portal'
+        };
+
+        // 2. Standard Registration Logic
+        const existingUser = await User.findOne({ email: userData.email });
+        if (existingUser) return res.status(400).json({ success: false, message: "User already exists" });
+
+        const uniqueId = await generateUserId(userData.state);
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(userData.password, salt);
+
+        const user = new User({
+            ...userData,
+            password: hashedPassword,
+            uniqueId,
+            isActive: true
+        });
+
+        await user.save();
+
+        // 3. Email User
+        const userWelcomeContent = generateEmailTemplate(
+            "Welcome to KalyanaShobha",
+            `<p>Dear ${user.firstName},</p>
+             <p>Your profile has been created by our agent <strong>${agent.name}</strong>.</p>
+             <p><strong>Profile ID:</strong> ${user.uniqueId}</p>
+             <p><strong>Password:</strong> ${userData.password}</p>
+             <p>Please login and change your password.</p>`
+        );
+        sendMail({ to: user.email, subject: "Profile Created via Agent", html: userWelcomeContent });
+
+        res.json({ success: true, message: "User registered successfully under your referral." });
+
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// 4. View Membership Payments (Only for My Users)
+app.get("/api/agent/payments/registrations", verifyAgent, async (req, res) => {
+    try {
+        // 1. Get IDs of my users
+        const myUsers = await User.find({ referredByAgentId: req.agentId }).select('_id');
+        const userIds = myUsers.map(u => u._id);
+
+        // 2. Find payments where userId is in that list
+        const payments = await PaymentRegistration.find({ userId: { $in: userIds } })
+            .populate('userId', 'firstName lastName uniqueId mobileNumber')
+            .sort({ date: -1 });
+
+        res.json({ success: true, count: payments.length, payments });
+    } catch (e) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// 5. View Interest Payments/Activities (Only for My Users)
+app.get("/api/agent/payments/interests", verifyAgent, async (req, res) => {
+    try {
+        // 1. Get IDs of my users
+        const myUsers = await User.find({ referredByAgentId: req.agentId }).select('_id');
+        const userIds = myUsers.map(u => u._id);
+
+        // 2. Find interest payments where SENDER is one of my users
+        const payments = await PaymentInterest.find({ senderId: { $in: userIds } })
+            .populate('senderId', 'firstName lastName uniqueId')
+            .populate('receiverId', 'firstName lastName uniqueId') // Show who they paid for
+            .sort({ date: -1 });
+
+        res.json({ success: true, count: payments.length, payments });
+    } catch (e) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
 
 
 
