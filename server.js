@@ -1179,14 +1179,38 @@ app.get("/api/admin/vendors", verifyAdmin, async (req, res) => {
 // E. PAYMENTS & INTERESTS
 // ====================================================================
 
-// 1. Submit Payment (User)
+// 1. Submit Payment (User) - UPDATED WITH DUPLICATE CHECK
 app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("screenshot"), async (req, res) => {
     try {
+        // --- NEW LOGIC START: Check for existing pending request ---
+        const existingPayment = await PaymentRegistration.findOne({ 
+            userId: req.userId, 
+            status: 'PendingVerification' 
+        });
+
+        if (existingPayment) {
+            return res.json({ 
+                success: false, 
+                message: "You have already submitted a payment request. Please wait for admin verification.", 
+                status: existingPayment.status,
+                alreadySubmitted: true 
+            });
+        }
+        // --- NEW LOGIC END ---
+
         const { amount, utrNumber } = req.body;
         const user = await User.findById(req.userId);
 
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "Screenshot is required" });
+        }
+
         const payment = new PaymentRegistration({
-            userId: req.userId, amount, utrNumber, screenshotUrl: req.file.path
+            userId: req.userId, 
+            amount, 
+            utrNumber, 
+            screenshotUrl: req.file.path,
+            status: 'PendingVerification'
         });
         await payment.save();
 
@@ -1194,19 +1218,64 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
             "Payment Received",
             `<p>We have received your payment submission of <strong>Rs. ${amount}</strong>.</p>
              <p>Our team will verify the transaction details (UTR: ${utrNumber}) within 24 hours.</p>
-             <p>You will receive a confirmation email once your membership is activated.</p>`
+             <p>You will be notified once your membership is activated.</p>`
         );
         sendMail({ to: user.email, subject: "Payment Submission Received", html: emailContent });
 
-        // Admin Alert (Simplified for internal)
-        sendMail({ to: process.env.EMAIL_USER, subject: "New Membership Payment", html: `<p>User ${req.userId} paid ${amount}. Please verify.</p>` });
+        // Admin Alert
+        sendMail({ 
+            to: process.env.EMAIL_USER, 
+            subject: "New Membership Payment", 
+            html: `<p>User ${user.firstName} (ID: ${user.uniqueId}) paid ${amount}. Please verify in dashboard.</p>` 
+        });
 
-        res.json({ success: true, message: "Submitted" });
-    } catch (e) { res.status(500).json({ success: false }); }
+        res.json({ success: true, message: "Submitted successfully", status: "PendingVerification" });
+
+    } catch (e) { 
+        console.error(e);
+        res.status(500).json({ success: false, message: "Server Error" }); 
+    }
 });
 
+// ====================================================================
+// NEW API: GET LATEST REGISTRATION PAYMENT STATUS
+// ====================================================================
 
+app.get("/api/payment/registration/status", verifyUser, async (req, res) => {
+    try {
+        // 1. Find the LATEST payment submission for this user
+        // We sort by date: -1 to get the newest one first
+        const latestPayment = await PaymentRegistration.findOne({ userId: req.userId })
+            .sort({ date: -1 });
 
+        // 2. If no payment record exists at all
+        if (!latestPayment) {
+            return res.json({
+                success: true,
+                paymentFound: false,
+                message: "No payment history found."
+            });
+        }
+
+        // 3. Return the details
+        res.json({
+            success: true,
+            paymentFound: true,
+            data: {
+                amount: latestPayment.amount,
+                utrNumber: latestPayment.utrNumber,
+                screenshotUrl: latestPayment.screenshotUrl, // The uploaded proof
+                status: latestPayment.status,               // 'PendingVerification', 'Success', 'Rejected'
+                adminNote: latestPayment.adminNote,         // If admin rejected, reason will be here
+                date: latestPayment.date
+            }
+        });
+
+    } catch (e) {
+        console.error("Payment Status Error:", e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
 
 
 // ====================================================================
