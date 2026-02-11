@@ -321,6 +321,29 @@ app.get("/api/agent/users/interests", verifyAgent, async (req, res) => {
 });
 
 
+// ====================================================================
+// VENDORS (USER FACING)
+// ====================================================================
+
+// Get all approved vendors for users
+app.get("/api/user/vendors", verifyUser, async (req, res) => {
+    try {
+        // Fetch only vendors that have been approved by the admin
+        // Sort by 'createdAt: -1' to show the newest vendors first
+        const vendors = await Vendor.find({ isApproved: true }).sort({ createdAt: -1 });
+        
+        res.json({ 
+            success: true, 
+            count: vendors.length, 
+            vendors 
+        });
+
+    } catch (error) {
+        console.error("Fetch Vendors Error:", error);
+        res.status(500).json({ success: false, message: "Server Error fetching vendors" });
+    }
+});
+
 
 
 // ====================================================================
