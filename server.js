@@ -148,54 +148,6 @@ async function sendMail({ to, subject, html }) {
 
 
 
-app.get("/api/agent/users/interests", verifyAgent, async (req, res) => {
-    try {
-        // 1. Get the IDs of all users referred by this agent
-        const myUsers = await User.find({ referredByAgentId: req.agentId }).select('_id');
-        const userIds = myUsers.map(u => u._id);
-
-        if (userIds.length === 0) {
-            return res.json({ success: true, count: 0, data: [] });
-        }
-
-        // 2. Find all interests where the sender OR receiver is one of the agent's users
-        const interests = await Interest.find({
-            $or: [
-                { senderId: { $in: userIds } },
-                { receiverId: { $in: userIds } }
-            ]
-        })
-        .populate('senderId', 'firstName lastName uniqueId')
-        .populate('receiverId', 'firstName lastName uniqueId')
-        .sort({ date: -1 }); // Newest first
-
-        // 3. Format the data to make it easy for the frontend to display
-        const formattedInterests = interests.map(interest => {
-            
-            // Determine if the agent's user sent this request or received it
-            const isSenderMyUser = userIds.some(id => 
-                id.toString() === interest.senderId._id.toString()
-            );
-
-            return {
-                interestId: interest._id,
-                direction: isSenderMyUser ? "Sent" : "Received", // Did the agent's client send or receive this?
-                myClient: isSenderMyUser ? interest.senderId : interest.receiverId,
-                matchProfile: isSenderMyUser ? interest.receiverId : interest.senderId,
-                status: interest.status,
-                date: interest.date
-            };
-        });
-
-        res.json({ success: true, count: formattedInterests.length, data: formattedInterests });
-
-    } catch (e) {
-        console.error("Agent Interests Error:", e);
-        res.status(500).json({ success: false, message: "Server Error fetching interests" });
-    }
-});
-
-
 
 
 
@@ -319,6 +271,54 @@ const verifyAgent = (req, res, next) => {
         return res.status(401).json({ success: false, message: "Unauthorized Agent" });
     }
 };
+
+
+app.get("/api/agent/users/interests", verifyAgent, async (req, res) => {
+    try {
+        // 1. Get the IDs of all users referred by this agent
+        const myUsers = await User.find({ referredByAgentId: req.agentId }).select('_id');
+        const userIds = myUsers.map(u => u._id);
+
+        if (userIds.length === 0) {
+            return res.json({ success: true, count: 0, data: [] });
+        }
+
+        // 2. Find all interests where the sender OR receiver is one of the agent's users
+        const interests = await Interest.find({
+            $or: [
+                { senderId: { $in: userIds } },
+                { receiverId: { $in: userIds } }
+            ]
+        })
+        .populate('senderId', 'firstName lastName uniqueId')
+        .populate('receiverId', 'firstName lastName uniqueId')
+        .sort({ date: -1 }); // Newest first
+
+        // 3. Format the data to make it easy for the frontend to display
+        const formattedInterests = interests.map(interest => {
+            
+            // Determine if the agent's user sent this request or received it
+            const isSenderMyUser = userIds.some(id => 
+                id.toString() === interest.senderId._id.toString()
+            );
+
+            return {
+                interestId: interest._id,
+                direction: isSenderMyUser ? "Sent" : "Received", // Did the agent's client send or receive this?
+                myClient: isSenderMyUser ? interest.senderId : interest.receiverId,
+                matchProfile: isSenderMyUser ? interest.receiverId : interest.senderId,
+                status: interest.status,
+                date: interest.date
+            };
+        });
+
+        res.json({ success: true, count: formattedInterests.length, data: formattedInterests });
+
+    } catch (e) {
+        console.error("Agent Interests Error:", e);
+        res.status(500).json({ success: false, message: "Server Error fetching interests" });
+    }
+});
 
 
 
