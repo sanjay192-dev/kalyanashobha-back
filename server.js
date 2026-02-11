@@ -1940,18 +1940,20 @@ app.get("/api/agent/dashboard/stats", verifyAgent, async (req, res) => {
     }
 });
 
-// 2. Get "My Users" List
+// 2. Get "My Users" List (Detailed, No Photos, No Address)
 app.get("/api/agent/users", verifyAgent, async (req, res) => {
     try {
         const users = await User.find({ referredByAgentId: req.agentId })
-            .select('-password -otp') // Exclude sensitive info
+            // Exclude: password, photos, and address fields (country, state, city)
+            .select('-password -photos -country -state -city -fcmToken') 
             .sort({ createdAt: -1 });
-            
+
         res.json({ success: true, count: users.length, users });
     } catch (e) {
         res.status(500).json({ success: false, message: e.message });
     }
 });
+
 
 // 3. Register a User (Manual Entry by Agent) - *** FIXED ENUM & FIELDS ***
 app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
