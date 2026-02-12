@@ -1314,29 +1314,95 @@ app.delete("/api/admin/agents/:id", verifyAdmin, async (req, res) => {
     }
 });
 
+// ====================================================================
+// ADMIN: VENDOR MANAGEMENT (POST, GET, DELETE)
+// ====================================================================
 
+// 1. POST: Create a new Vendor (Handles single, multiple, or no images)
+app.post("/api/admin/vendors", verifyAdmin, uploadVendor.array("images", 5), async (req, res) => {
+  try {
+    // Safely check if images were uploaded. If yes, map to their Cloudinary URLs.
+    const images = req.files && req.files.length > 0 
+      ? req.files.map(file => file.path) 
+      : [];
 
+    const { businessName, category, description, contactNumber, priceRange } = req.body;
 
+    // Basic Validation
+    if (!businessName || !category || !contactNumber) {
+      return res.status(400).json({ success: false, message: "Business Name, Category, and Contact Number are required." });
+    }
 
+    const vendor = new Vendor({
+      businessName,
+      category,
+      description,
+      contactNumber,
+      priceRange,
+      images,
+      isApproved: true // Auto-approved since admin is adding it
+    });
 
-
-
-app.post("/api/admin/vendors", verifyAdmin, uploadVendor.array("images", 3), async (req, res) => {
-    try {
-        const images = req.files.map(f => f.path);
-        const vendor = new Vendor({ ...req.body, images, isApproved: true });
-        await vendor.save();
-        res.json({ success: true, vendor });
-    } catch (e) { res.status(500).json({ success: false }); }
+    await vendor.save();
+    res.json({ success: true, message: "Vendor created successfully", vendor });
+  } catch (error) { 
+    console.error("Vendor POST Error:", error);
+    res.status(500).json({ success: false, message: error.message || "Failed to create vendor" }); 
+  }
 });
-app.delete("/api/admin/vendors/:id", verifyAdmin, async (req, res) => {
-    await Vendor.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
-});
+
+// 2. GET: Fetch all Vendors for Admin Dashboard
 app.get("/api/admin/vendors", verifyAdmin, async (req, res) => {
-    const vendors = await Vendor.find();
-    res.json({ success: true, vendors });
+  try {
+    // Sort by newest first
+    const vendors = await Vendor.find().sort({ createdAt: -1 });
+    res.json({ success: true, count: vendors.length, vendors });
+  } catch (error) {
+    console.error("Vendor GET Error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch vendors" });
+  }
 });
+
+// 3. DELETE: Remove Vendor AND clean up Cloudinary images
+app.delete("/api/admin/vendors/:id", verifyAdmin, async (req, res) => {
+  try {
+    const vendor = await Vendor.findById(req.params.id);
+    if (!vendor) {
+      return res.status(404).json({ success: false, message: "Vendor not found" });
+    }
+
+    // --- CLOUDINARY CLEANUP ---
+    // We must delete the images from Cloudinary so you don't run out of storage space
+    if (vendor.images && vendor.images.length > 0) {
+      const deletePromises = vendor.images.map(imageUrl => {
+        // Extract the Cloudinary public_id from the URL
+        // Example URL: https://res.cloudinary.com/demo/image/upload/v1234/matrimony_vendors/xyz.jpg
+        const parts = imageUrl.split('/');
+        const fileWithExt = parts.pop(); // "xyz.jpg"
+        const folder = parts.pop(); // "matrimony_vendors"
+        const publicId = `${folder}/${fileWithExt.split('.')[0]}`; // "matrimony_vendors/xyz"
+        
+        return cloudinary.uploader.destroy(publicId);
+      });
+      
+      // Wait for all images to be deleted from Cloudinary
+      await Promise.all(deletePromises);
+    }
+
+    // Now delete from MongoDB
+    await Vendor.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: "Vendor and associated images deleted successfully" });
+  } catch (error) {
+    console.error("Vendor DELETE Error:", error);
+    res.status(500).json({ success: false, message: "Failed to delete vendor" });
+  }
+});
+            
+
+
+
+
+
 
 // ====================================================================
 // E. PAYMENTS & INTERESTS
