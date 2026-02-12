@@ -2272,7 +2272,59 @@ app.get("/api/agent/payments/interests", verifyAgent, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-                            
+
+
+// ====================================================================
+// NEW: DEDICATED RESTRICT/BLOCK USER API
+// ====================================================================
+
+app.post("/api/admin/users/restrict", verifyAdmin, async (req, res) => {
+    try {
+        const { userId, restrict } = req.body; // restrict: true = BLOCK, false = UNBLOCK
+
+        if (!userId) {
+            return res.status(400).json({ success: false, message: "User ID is required" });
+        }
+
+        const user = await User.findById(userId);
+        
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        // Logic: If restricting, set isActive to false. If unrestricting, set isActive to true.
+        user.isActive = !restrict; 
+        
+        await user.save();
+
+        const actionWord = restrict ? "Restricted (Blocked)" : "Unrestricted (Active)";
+        
+        // Optional: Notify User
+        if (restrict) {
+            const emailContent = generateEmailTemplate(
+                "Account Access Restricted",
+                `<p>Your account access has been restricted by the administrator.</p>
+                 <p>You will no longer be able to log in.</p>
+                 <p>Please contact support if you believe this is an error.</p>`
+            );
+            sendMail({ to: user.email, subject: "Account Status Update", html: emailContent });
+        } else {
+             const emailContent = generateEmailTemplate(
+                "Account Access Restored",
+                `<p>Your account restriction has been removed.</p>
+                 <p>You can now log in to your dashboard.</p>`
+            );
+            sendMail({ to: user.email, subject: "Account Status Update", html: emailContent });
+        }
+
+        res.json({ success: true, message: `User successfully ${actionWord}` });
+
+    } catch (e) {
+        console.error("Restriction API Error:", e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
 
 
 const PORT = process.env.PORT || 5000;
