@@ -2034,28 +2034,55 @@ app.get("/api/admin/users/advanced", verifyAdmin, async (req, res) => {
 });
 
 // ====================================================================
-// MISSING API 2: Delete User
+// MISSING API 2: Delete User (UPDATED WITH CLOUDINARY CLEANUP)
 // ====================================================================
 app.delete("/api/admin/users/:id", verifyAdmin, async (req, res) => {
     try {
         const userId = req.params.id;
         
-        // Optional: Clean up related data (Payments, Interests) if necessary
-        // await PaymentRegistration.deleteMany({ userId });
-        // await Interest.deleteMany({ $or: [{ senderId: userId }, { receiverId: userId }] });
+        // 1. Find the user first (We need their data to get photo URLs)
+        const user = await User.findById(userId);
 
-        const deletedUser = await User.findByIdAndDelete(userId);
-        
-        if (!deletedUser) {
+        if (!user) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        res.json({ success: true, message: "User deleted permanently" });
+        // 2. DELETE PHOTOS FROM CLOUDINARY
+        // Check if user has photos and loop through them
+        if (user.photos && user.photos.length > 0) {
+            const deletePromises = user.photos.map(imageUrl => {
+                // Extract Public ID from URL
+                // Example: https://res.cloudinary.com/.../matrimony_users/abc123.jpg
+                // We need: "matrimony_users/abc123"
+                
+                const parts = imageUrl.split('/');
+                const fileWithExt = parts.pop();       // "abc123.jpg"
+                const folder = parts.pop();            // "matrimony_users"
+                const publicId = `${folder}/${fileWithExt.split('.')[0]}`; 
+
+                return cloudinary.uploader.destroy(publicId);
+            });
+
+            // Wait for all Cloudinary deletions to finish
+            await Promise.all(deletePromises);
+        }
+
+        // 3. Optional: Delete related payments/interests (Cleanup database references)
+        // await PaymentRegistration.deleteMany({ userId });
+        // await Interest.deleteMany({ $or: [{ senderId: userId }, { receiverId: userId }] });
+
+        // 4. Finally, Delete User from MongoDB
+        await User.findByIdAndDelete(userId);
+
+        res.json({ success: true, message: "User and their photos deleted permanently" });
+
     } catch (e) {
-        console.error(e);
+        console.error("Delete User Error:", e);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+
+
 
 // ====================================================================
 // I. AGENT DASHBOARD OPERATIONS (FIXED)
