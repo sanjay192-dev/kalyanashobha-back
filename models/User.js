@@ -58,7 +58,8 @@ const UserSchema = new mongoose.Schema({
   isPaidMember: { type: Boolean, default: false },
   isApproved: { type: Boolean, default: false }, 
   isActive: { type: Boolean, default: true },   
-  rejectionReason: { type: String },             
+  rejectionReason: { type: String },   
+isRestricted: { type: Boolean, default: false },          
 
   fcmToken: { type: String },
   createdAt: { type: Date, default: Date.now }
