@@ -2350,6 +2350,61 @@ app.post("/api/admin/users/restrict", verifyAdmin, async (req, res) => {
     }
 });
 
+// ====================================================================
+// NEW: CREATE SUPER ADMIN VIA POSTMAN
+// ====================================================================
+app.post("/api/admin/create-super-admin", async (req, res) => {
+    try {
+        const { username, email, password, securityKey } = req.body;
+
+        // 1. SECURITY CHECK
+        // This prevents random people from creating an admin. 
+        // You must send "secure_admin_creation_key" in your Postman body.
+        if (securityKey !== "secure_admin_creation_key") {
+            return res.status(403).json({ success: false, message: "Invalid Security Key. Access Denied." });
+        }
+
+        // 2. Validation
+        if (!username || !email || !password) {
+            return res.status(400).json({ success: false, message: "Please provide username, email, and password." });
+        }
+
+        // 3. Check if Admin already exists
+        const existingAdmin = await Admin.findOne({ email });
+        if (existingAdmin) {
+            return res.status(400).json({ success: false, message: "Admin with this email already exists." });
+        }
+
+        // 4. Hash Password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // 5. Create the Admin
+        const newAdmin = new Admin({
+            username: username,
+            email: email,
+            password: hashedPassword,
+            role: "SuperAdmin" // Forces the role to SuperAdmin
+        });
+
+        await newAdmin.save();
+
+        res.json({ 
+            success: true, 
+            message: "New Super Admin Created Successfully!",
+            admin: {
+                id: newAdmin._id,
+                email: newAdmin.email,
+                role: newAdmin.role
+            }
+        });
+
+    } catch (e) {
+        console.error("Create Admin Error:", e);
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
 
 
 const PORT = process.env.PORT || 5000;
