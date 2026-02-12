@@ -1992,11 +1992,8 @@ uniqueId: req.receiverId.uniqueId,
     }
 });
 
-
-
-
 // ====================================================================
-// MISSING API 1: Advanced List (Pagination + Quick Search + Filters)
+// UPDATED API 1: Advanced List (Fixed Filtering & Agent Populating)
 // ====================================================================
 app.get("/api/admin/users/advanced", verifyAdmin, async (req, res) => {
     try {
@@ -2004,7 +2001,7 @@ app.get("/api/admin/users/advanced", verifyAdmin, async (req, res) => {
         
         const query = {};
 
-        // 1. Search Logic (Name, Email, Mobile, or UniqueID)
+        // 1. Search Logic
         if (search) {
             query.$or = [
                 { firstName: { $regex: search, $options: "i" } },
@@ -2015,11 +2012,16 @@ app.get("/api/admin/users/advanced", verifyAdmin, async (req, res) => {
             ];
         }
 
-        // 2. Referral Filter
+        // 2. Referral Filter (FIXED)
         if (referralType === 'agent') {
+            // Must have an agent ID
             query.referredByAgentId = { $ne: null }; 
         } else if (referralType === 'self') {
-            query.referredByAgentId = null; 
+            // Must NOT have an agent ID (Check for null OR field does not exist)
+            query.$or = [
+                { referredByAgentId: null }, 
+                { referredByAgentId: { $exists: false } }
+            ];
         }
 
         // 3. Status Filter
@@ -2027,12 +2029,14 @@ app.get("/api/admin/users/advanced", verifyAdmin, async (req, res) => {
         if (status === 'active') query.isActive = true;
         if (status === 'pending') query.isApproved = false;
 
-        // 4. Execute with Pagination
+        // 4. Execute with Pagination & Population
         const users = await User.find(query)
             .sort({ createdAt: -1 })
             .limit(limit * 1)
             .skip((page - 1) * limit)
-            .select('-password');
+            .select('-password')
+            // *** THIS IS THE KEY FIX FOR AGENT DETAILS ***
+            .populate('referredByAgentId', 'name agentCode mobile'); 
 
         const count = await User.countDocuments(query);
 
@@ -2049,6 +2053,10 @@ app.get("/api/admin/users/advanced", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+    
+
+
+
 
 // ====================================================================
 // MISSING API 2: Delete User (UPDATED WITH CLOUDINARY CLEANUP)
