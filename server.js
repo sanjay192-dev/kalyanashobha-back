@@ -825,18 +825,31 @@ app.get("/api/user/photos-status", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-
-
-
 app.post("/api/auth/login-init", async (req, res) => {
     try {
         const { email, password } = req.body;
-        const user = await User.findOne({ email, isActive: true }); 
-        if (!user) return res.status(404).json({ success: false, message: "User not found or blocked" });
+        
+        // 1. Find user by email ONLY (Removed isActive: true check here)
+        const user = await User.findOne({ email }); 
+        
+        // 2. If user doesn't exist at all
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
 
+        // 3. SPECIFIC CHECK: If user exists but is restricted (isActive is false)
+        if (!user.isActive) {
+            return res.status(403).json({ 
+                success: false, 
+                message: "ACCESS DENIED: Your account has been restricted by Admin." 
+            });
+        }
+
+        // 4. Validate Password
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(400).json({ success: false, message: "Invalid credentials" });
 
+        // 5. Generate OTP (Rest of your logic remains same)
         const otp = Math.floor(100000 + Math.random() * 900000);
         otpStore[email] = otp;
         setTimeout(() => delete otpStore[email], 300000); 
@@ -851,8 +864,12 @@ app.post("/api/auth/login-init", async (req, res) => {
 
         await sendMail({ to: email, subject: "Your Login OTP", html: emailContent });
         res.json({ success: true, message: "OTP sent to email." });
-    } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+
+    } catch (e) { 
+        res.status(500).json({ success: false, message: e.message }); 
+    }
 });
+
 
 app.post("/api/auth/login-verify", async (req, res) => {
     try {
