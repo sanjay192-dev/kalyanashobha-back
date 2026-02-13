@@ -545,9 +545,6 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 
 const otpStore = {}; 
 
-// ====================================================================
-// B. USER AUTH (Direct Register -> Email Notifications)
-// ====================================================================
 
 // 1. REGISTER (Single Step: Save, Email User, Email Admin)
 app.post("/api/auth/register", async (req, res) => {
@@ -566,13 +563,12 @@ app.post("/api/auth/register", async (req, res) => {
         const hashedPassword = await bcrypt.hash(data.password, salt);
 
         // Create User
-        // We save them immediately. Verification happens implicitly via the Login OTP flow later.
         const user = new User({ 
             ...data, 
             password: hashedPassword, 
             uniqueId, 
             photos: [],
-            isEmailVerified: false, // Will be "verified" effectively when they first successfully login with OTP
+            isEmailVerified: false, 
             isActive: true 
         });
 
@@ -590,12 +586,6 @@ app.post("/api/auth/register", async (req, res) => {
              </div>`
         );
 
-        sendMail({ 
-            to: user.email, 
-            subject: "Welcome to KalyanaShobha Matrimony", 
-            html: userWelcomeContent 
-        });
-
         // --- EMAIL 2: NEW REGISTRATION ALERT TO ADMIN ---
         const adminAlertContent = generateEmailTemplate(
             "New User Registration",
@@ -611,12 +601,36 @@ app.post("/api/auth/register", async (req, res) => {
              <p style="margin-top: 15px;">Please login to the Admin Dashboard to review/approve this profile.</p>`
         );
 
-        // Send to the admin email configured in environment variables
-        sendMail({ 
-            to: process.env.EMAIL_USER, // sending to your own admin email
+        // ---------------------------------------------------------
+        // CORRECTION START: Wait for emails to send parallelly
+        // ---------------------------------------------------------
+        
+        // 1. Create the promises (start the sending process)
+        const sendUserMail = sendMail({ 
+            to: user.email, 
+            subject: "Welcome to KalyanaShobha Matrimony", 
+            html: userWelcomeContent 
+        });
+
+        const sendAdminMail = sendMail({ 
+            to: process.env.EMAIL_USER, 
             subject: `New User: ${user.uniqueId} (${user.firstName})`, 
             html: adminAlertContent 
         });
+
+        // 2. Wait for both to complete
+        // If we don't await here, res.json() kills the process before emails send
+        try {
+            await Promise.all([sendUserMail, sendAdminMail]);
+            console.log("Both registration emails sent successfully.");
+        } catch (emailError) {
+            console.error("Warning: Emails failed to send, but user was created.", emailError);
+            // We do NOT return an error to the user here, because the account WAS created.
+        }
+
+        // ---------------------------------------------------------
+        // CORRECTION END
+        // ---------------------------------------------------------
 
         res.json({ 
             success: true, 
@@ -629,7 +643,7 @@ app.post("/api/auth/register", async (req, res) => {
         res.status(500).json({ success: false, message: e.message }); 
     }
 });
-
+                                       
 
 
 // ======================== FORGOT PASSWORD (SEND OTP) =========================
