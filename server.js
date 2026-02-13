@@ -1482,14 +1482,36 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
              <p>Our team will verify the transaction details (UTR: ${utrNumber}) within 24 hours.</p>
              <p>You will be notified once your membership is activated.</p>`
         );
-        sendMail({ to: user.email, subject: "Payment Submission Received", html: emailContent });
 
-        // Admin Alert
-        sendMail({ 
+        // ---------------------------------------------------------
+        // CORRECTION START: Wait for emails to send parallelly
+        // ---------------------------------------------------------
+
+        // 1. Create the promises (start sending)
+        const sendUserMail = sendMail({ 
+            to: user.email, 
+            subject: "Payment Submission Received", 
+            html: emailContent 
+        });
+
+        const sendAdminMail = sendMail({ 
             to: process.env.EMAIL_USER, 
             subject: "New Membership Payment", 
             html: `<p>User ${user.firstName} (ID: ${user.uniqueId}) paid ${amount}. Please verify in dashboard.</p>` 
         });
+
+        // 2. Wait for both to complete
+        // This ensures emails are actually sent before the response closes the connection
+        try {
+            await Promise.all([sendUserMail, sendAdminMail]);
+            console.log("Payment emails sent successfully.");
+        } catch (emailError) {
+            console.error("Warning: Payment emails failed, but DB record saved.", emailError);
+        }
+
+        // ---------------------------------------------------------
+        // CORRECTION END
+        // ---------------------------------------------------------
 
         res.json({ success: true, message: "Submitted successfully", status: "PendingVerification" });
 
@@ -1498,6 +1520,7 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
         res.status(500).json({ success: false, message: "Server Error" }); 
     }
 });
+
 
 // ====================================================================
 // NEW API: GET LATEST REGISTRATION PAYMENT STATUS
