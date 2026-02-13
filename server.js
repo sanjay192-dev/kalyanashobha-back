@@ -1720,14 +1720,12 @@ app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res)
 
 
 // 3. Submit Interest (User) - UPDATED WITH DUPLICATE CHECK
+
 app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screenshot"), async (req, res) => {
     try {
         const { receiverId, amount, utrNumber } = req.body;
 
         // --- NEW LOGIC START: DUPLICATE CHECK ---
-        // Check if an interest request already exists for this pair
-        // We look for any status EXCEPT 'Rejected'. 
-        // (If it was Rejected by admin previously, we allow them to try again).
         const existingInterest = await Interest.findOne({
             senderId: req.userId,
             receiverId: receiverId,
@@ -1735,7 +1733,7 @@ app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screens
         });
 
         if (existingInterest) {
-            // Delete the uploaded file to save cloud storage space since we are rejecting the request
+            // Delete the uploaded file to save cloud storage space
             if (req.file) {
                 await cloudinary.uploader.destroy(req.file.filename);
             }
@@ -1778,7 +1776,7 @@ app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screens
         });
         await interest.save();
 
-        // 4. Send Email to SENDER (Acknowledgment)
+        // 4. PREPARE EMAIL CONTENT
         const userEmailContent = generateEmailTemplate(
             "Interest Request Received",
             `<p>Dear ${user.firstName},</p>
@@ -1786,13 +1784,7 @@ app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screens
              <p>Our administration team is currently verifying the transaction details (UTR: ${utrNumber}). Once verified, your interest will be forwarded to the recipient.</p>
              <p>Status: Payment Verification Pending</p>`
         );
-        sendMail({ 
-            to: user.email, 
-            subject: "Notification: Interest Request Submitted", 
-            html: userEmailContent 
-        });
 
-        // 5. Send Email to ADMIN (Action Required)
         const adminEmailContent = generateEmailTemplate(
             "Action Required: New Interest Payment",
             `<p>A new interest payment has been submitted for verification.</p>
@@ -1801,11 +1793,35 @@ app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screens
                 <strong>Amount:</strong> Rs. ${amount}</p>
              <p>Please log in to the Admin Dashboard to verify the screenshot and approve the request.</p>`
         );
-        sendMail({ 
+
+        // ---------------------------------------------------------
+        // CORRECTION START: Wait for emails to send parallelly
+        // ---------------------------------------------------------
+
+        // 1. Create promises (start sending)
+        const sendUserMail = sendMail({ 
+            to: user.email, 
+            subject: "Notification: Interest Request Submitted", 
+            html: userEmailContent 
+        });
+
+        const sendAdminMail = sendMail({ 
             to: process.env.EMAIL_USER, 
             subject: "Admin Alert: New Interest Verification Required", 
             html: adminEmailContent 
         });
+
+        // 2. Wait for both to complete
+        try {
+            await Promise.all([sendUserMail, sendAdminMail]);
+            console.log("Interest submission emails sent successfully.");
+        } catch (emailError) {
+            console.error("Warning: Emails failed to send.", emailError);
+        }
+
+        // ---------------------------------------------------------
+        // CORRECTION END
+        // ---------------------------------------------------------
 
         res.json({ success: true, message: "Interest Request and Payment Proof Submitted" });
 
