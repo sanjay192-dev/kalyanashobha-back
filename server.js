@@ -547,6 +547,7 @@ const otpStore = {};
 
 
 // 1. REGISTER (Single Step: Save, Email User, Email Admin)
+// 1. REGISTER (Single Step: Save, Email User, Email Admin)
 app.post("/api/auth/register", async (req, res) => {
     try {
         const data = req.body;
@@ -643,6 +644,7 @@ app.post("/api/auth/register", async (req, res) => {
         res.status(500).json({ success: false, message: e.message }); 
     }
 });
+
                                        
 
 
