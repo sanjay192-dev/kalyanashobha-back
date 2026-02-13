@@ -1648,7 +1648,7 @@ app.get("/api/admin/payment/registrations", verifyAdmin, async (req, res) => {
 app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res) => {
     try {
         const { paymentId, action } = req.body;
-        
+
         // Find the payment record
         const payment = await PaymentRegistration.findById(paymentId);
         if (!payment) return res.status(404).json({ success: false, message: "Payment not found" });
@@ -1660,11 +1660,11 @@ app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res)
         if (action === "approve") {
             // --- UPDATED LOGIC START ---
             payment.status = "Success"; 
-            
+
             user.isPaidMember = true;   // Mark as Paid
             user.isApproved = true;     // MAKE VISIBLE TO OTHERS (Profile Approved)
             user.isActive = true;       // Ensure account is active/unblocked
-            
+
             // Save both
             await payment.save(); 
             await user.save();
@@ -1675,21 +1675,39 @@ app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res)
                 `<p>We verified your payment successfully.</p>
                  <p>Your Paid Membership is now <strong>Active</strong>. Your profile is now visible to matches and you can access premium features.</p>`
             );
-            sendMail({ to: user.email, subject: "Membership Activated", html: emailContent });
+
+            // ---------------------------------------------------------
+            // CORRECTION: Add await so the loop waits for email to send
+            // ---------------------------------------------------------
+            try {
+                await sendMail({ to: user.email, subject: "Membership Activated", html: emailContent });
+                console.log("Approval email sent.");
+            } catch (emailErr) {
+                console.error("Failed to send approval email:", emailErr);
+            }
 
         } else {
             // Rejection Logic
             payment.status = "Rejected"; 
             await payment.save();
-            
+
             const emailContent = generateEmailTemplate(
                 "Payment Verification Failed",
                 `<p>We could not verify your recent payment transaction.</p>
                  <p>Please check if the UTR number or screenshot provided was correct and try submitting again.</p>`
             );
-            sendMail({ to: user.email, subject: "Action Required: Payment Issue", html: emailContent });
+
+            // ---------------------------------------------------------
+            // CORRECTION: Add await here too
+            // ---------------------------------------------------------
+            try {
+                await sendMail({ to: user.email, subject: "Action Required: Payment Issue", html: emailContent });
+                console.log("Rejection email sent.");
+            } catch (emailErr) {
+                console.error("Failed to send rejection email:", emailErr);
+            }
         }
-        
+
         res.json({ success: true, message: "Action processed successfully" });
 
     } catch (e) { 
@@ -1697,6 +1715,7 @@ app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res)
         res.status(500).json({ success: false, message: "Server Error" }); 
     }
 });
+                                
 
 
 
