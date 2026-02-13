@@ -1831,78 +1831,147 @@ app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screens
     }
 });
 
-
 // 4. Admin Verify Interest Payment
 app.post("/api/admin/payment/interest/verify", verifyAdmin, async (req, res) => {
     try {
         const { paymentId, action } = req.body;
-        const payment = await PaymentInterest.findById(paymentId).populate('senderId'); // Populated for Email
+        
+        // Populate senderId to get Name and Email
+        const payment = await PaymentInterest.findById(paymentId).populate('senderId'); 
         const interest = await Interest.findOne({ paymentId });
 
+        if (!payment || !interest) {
+            return res.status(404).json({ success: false, message: "Payment or Interest record not found" });
+        }
+
         if (action === "approve") {
-            payment.status = "Success"; interest.status = "PendingAdmin";
+            payment.status = "Success"; 
+            interest.status = "PendingAdmin";
+
+            // 1. CRITICAL FIX: Save DB *before* sending email
+            // This ensures the status updates even if email fails
+            await payment.save(); 
+            await interest.save();
 
             const emailContent = generateEmailTemplate(
                 "Payment Verified",
-                `<p>Your payment for the interest request has been verified.</p>
+                `<p>Dear ${payment.senderId.firstName},</p>
+                 <p>Your payment for the interest request has been verified.</p>
                  <p>Your request is now under final content review by our team.</p>`
             );
-            await sendMail({ to: payment.senderId.email, subject: "Payment Successful", html: emailContent });
+
+            // 2. Send Email with Error Handling (so it doesn't crash the response)
+            try {
+                await sendMail({ to: payment.senderId.email, subject: "Payment Successful", html: emailContent });
+                console.log("Interest payment approval email sent.");
+            } catch (emailErr) {
+                console.error("Failed to send approval email:", emailErr);
+            }
 
         } else {
-            payment.status = "Rejected"; interest.status = "Rejected";
+            payment.status = "Rejected"; 
+            interest.status = "Rejected";
+
+            // 1. CRITICAL FIX: Save DB *before* sending email
+            await payment.save(); 
+            await interest.save();
 
             const emailContent = generateEmailTemplate(
                 "Payment Verification Failed",
-                `<p>We were unable to verify your payment for the interest request.</p>
+                `<p>Dear ${payment.senderId.firstName},</p>
+                 <p>We were unable to verify your payment for the interest request.</p>
                  <p>Please ensure the transaction details are correct and submit again.</p>`
             );
-            await sendMail({ to: payment.senderId.email, subject: "Payment Verification Issue", html: emailContent });
+
+            // 2. Send Email with Error Handling
+            try {
+                await sendMail({ to: payment.senderId.email, subject: "Payment Verification Issue", html: emailContent });
+                console.log("Interest payment rejection email sent.");
+            } catch (emailErr) {
+                console.error("Failed to send rejection email:", emailErr);
+            }
         }
-        await payment.save(); await interest.save();
-        res.json({ success: true });
-    } catch (e) { res.status(500).json({ success: false }); }
+        
+        res.json({ success: true, message: "Action processed successfully" });
+
+    } catch (e) { 
+        console.error(e);
+        res.status(500).json({ success: false, message: "Server Error" }); 
+    }
 });
 
 // 5. Admin Approve Interest Content
 app.post("/api/admin/interest/approve-content", verifyAdmin, async (req, res) => {
     try {
         const { interestId, action } = req.body;
-        // Populate both to send emails
-        const interest = await Interest.findById(interestId).populate('receiverId').populate('senderId');
+        
+        // Populate both to send emails. 
+        // We select specific fields to ensure we have the names and emails.
+        const interest = await Interest.findById(interestId)
+            .populate('receiverId', 'firstName lastName email')
+            .populate('senderId', 'firstName lastName email');
+
+        if (!interest) {
+            return res.status(404).json({ success: false, message: "Interest record not found" });
+        }
 
         if (action === "approve") {
             interest.status = "PendingUser";
+            await interest.save(); // Save DB status first!
 
-            // Mail to Sender
+            // --- FIX: Use firstName + lastName instead of username ---
+            const senderName = `${interest.senderId.firstName} ${interest.senderId.lastName}`;
+            const receiverName = `${interest.receiverId.firstName} ${interest.receiverId.lastName}`;
+
+            // Mail to Sender (Confirmation)
             const senderContent = generateEmailTemplate(
                 "Request Forwarded",
-                `<p>Your interest request has been approved by our team and forwarded to the profile of <strong>${interest.receiverId.username}</strong>.</p>
+                `<p>Your interest request has been approved by our team and forwarded to the profile of <strong>${receiverName}</strong>.</p>
                  <p>You will be notified once they respond.</p>`
             );
-            sendMail({ to: interest.senderId.email, subject: "Request Forwarded", html: senderContent });
-
-            // Mail to Receiver
+            
+            // Mail to Receiver (Notification)
             const receiverContent = generateEmailTemplate(
                 "New Interest Received",
-                `<p>You have received a new interest from <strong>${interest.senderId.username}</strong>.</p>
+                `<p>You have received a new interest from <strong>${senderName}</strong>.</p>
                  <p>Please log in to your dashboard to view their profile and accept or decline this request.</p>`
             );
-            sendMail({ to: interest.receiverId.email, subject: "New Interest Notification", html: receiverContent });
+
+            // --- FIX: Send both emails in parallel and wait ---
+            try {
+                await Promise.all([
+                    sendMail({ to: interest.senderId.email, subject: "Request Forwarded", html: senderContent }),
+                    sendMail({ to: interest.receiverId.email, subject: "New Interest Notification", html: receiverContent })
+                ]);
+                console.log("Interest content approval emails sent.");
+            } catch (emailErr) {
+                console.error("Failed to send interest approval emails:", emailErr);
+            }
 
         } else {
+            // Rejection Logic
             interest.status = "Rejected";
+            await interest.save(); // Save DB status first!
+
             const senderContent = generateEmailTemplate(
                 "Request Status",
                 `<p>Your interest request could not be forwarded as it did not meet our content guidelines.</p>`
             );
-            sendMail({ to: interest.senderId.email, subject: "Interest Request Update", html: senderContent });
+
+            // --- FIX: Add await ---
+            try {
+                await sendMail({ to: interest.senderId.email, subject: "Interest Request Update", html: senderContent });
+                console.log("Interest content rejection email sent.");
+            } catch (emailErr) {
+                console.error("Failed to send interest rejection email:", emailErr);
+            }
         }
-        await interest.save();
-        res.json({ success: true });
+        
+        res.json({ success: true, message: "Action processed successfully" });
+
     } catch (e) {
         console.error(e);
-        res.status(500).json({ success: false });
+        res.status(500).json({ success: false, message: "Server Error" });
     }
 });
 
@@ -1910,40 +1979,74 @@ app.post("/api/admin/interest/approve-content", verifyAdmin, async (req, res) =>
 app.post("/api/user/interest/respond", verifyUser, async (req, res) => {
     try {
         const { interestId, action } = req.body;
-        const interest = await Interest.findById(interestId).populate('senderId').populate('receiverId');
+        
+        // Populate fields to get Names and Emails
+        const interest = await Interest.findById(interestId)
+            .populate('senderId', 'firstName lastName email')
+            .populate('receiverId', 'firstName lastName email');
 
-        // Security check
+        if (!interest) {
+            return res.status(404).json({ success: false, message: "Interest not found" });
+        }
+
+        // Security check: Ensure the person responding is actually the Receiver
         if (interest.receiverId._id.toString() !== req.userId) {
             return res.status(403).json({ success: false, message: "Not your request" });
         }
 
+        // Get the Receiver's Name (The person responding)
+        const receiverName = `${interest.receiverId.firstName} ${interest.receiverId.lastName}`;
+
         if (action === "accept") {
             interest.status = "Accepted";
+            
+            // 1. SAVE TO DB FIRST (Critical)
+            await interest.save();
 
             const senderContent = generateEmailTemplate(
                 "Interest Accepted",
-                `<p>Good news! <strong>${interest.receiverId.username}</strong> has accepted your interest request.</p>
+                `<p>Good news! <strong>${receiverName}</strong> has accepted your interest request.</p>
                  <p>You may now view their contact details on your dashboard.</p>`
             );
-            sendMail({ to: interest.senderId.email, subject: "Interest Request Accepted", html: senderContent });
+
+            // 2. SEND EMAIL (Wait for it)
+            try {
+                await sendMail({ to: interest.senderId.email, subject: "Interest Request Accepted", html: senderContent });
+                console.log("Acceptance email sent.");
+            } catch (emailErr) {
+                console.error("Failed to send acceptance email:", emailErr);
+            }
 
         } else {
             interest.status = "Declined";
 
+            // 1. SAVE TO DB FIRST
+            await interest.save();
+
             const senderContent = generateEmailTemplate(
                 "Interest Update",
-                `<p><strong>${interest.receiverId.username}</strong> has declined your interest request.</p>
+                `<p><strong>${receiverName}</strong> has declined your interest request.</p>
                  <p>We encourage you to continue searching for other suitable matches.</p>`
             );
-            sendMail({ to: interest.senderId.email, subject: "Interest Request Update", html: senderContent });
+
+            // 2. SEND EMAIL (Wait for it)
+            try {
+                await sendMail({ to: interest.senderId.email, subject: "Interest Request Update", html: senderContent });
+                console.log("Decline email sent.");
+            } catch (emailErr) {
+                console.error("Failed to send decline email:", emailErr);
+            }
         }
-        await interest.save();
-        res.json({ success: true });
+        
+        res.json({ success: true, message: "Response submitted successfully" });
+
     } catch (e) {
         console.error(e);
-        res.status(500).json({ success: false });
+        res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+
+
 
 // 7. Get Contact Details
 app.post("/api/user/get-contact", verifyUser, async (req, res) => {
