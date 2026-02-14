@@ -326,7 +326,7 @@ app.get("/api/agent/users/interests", verifyAgent, async (req, res) => {
 // ====================================================================
 
 // Get all approved vendors for users
-app.get("/api/user/vendors", verifyUser, async (req, res) => {
+app.get("/api/user/vendors",  async (req, res) => {
     try {
         // Fetch only vendors that have been approved by the admin
         // Sort by 'createdAt: -1' to show the newest vendors first
