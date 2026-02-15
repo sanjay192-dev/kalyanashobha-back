@@ -2587,9 +2587,8 @@ app.post("/api/admin/users/restrict", verifyAdmin, async (req, res) => {
     }
 });
 
-                    
-// ====================================================================
-// UNIFIED DASHBOARD & SEARCH API
+  // ====================================================================
+// UNIFIED DASHBOARD & SEARCH API (With Interest Status Check)
 // ====================================================================
 app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
     try {
@@ -2600,7 +2599,29 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
         const isViewerPremium = currentUser.isPaidMember;
         const targetGender = currentUser.gender === 'Male' ? 'Female' : 'Male';
 
-        // 2. Destructure Filters from Body
+        // 2. FETCH INTERACTIONS (The "Check First" Logic)
+        // Find any interest where the current user is the sender OR receiver
+        const interactions = await Interest.find({
+            $or: [
+                { senderId: req.userId }, 
+                { receiverId: req.userId }
+            ]
+        });
+
+        // 3. Create Status Map
+        // Key: Other User's ID -> Value: Status (e.g., 'PendingUser', 'Accepted')
+        const statusMap = {};
+        interactions.forEach(inter => {
+            const otherId = inter.senderId.toString() === req.userId.toString() 
+                ? inter.receiverId.toString() 
+                : inter.senderId.toString();
+
+            // If I sent it, the status is what is in DB. 
+            // If I received it, the logic might differ slightly visually, but usually we just show the status.
+            statusMap[otherId] = inter.status; 
+        });
+
+        // 4. Destructure Filters from Body
         const {
             searchId,
             minAge, maxAge,
@@ -2612,8 +2633,7 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
             occupation
         } = req.body;
 
-        // 3. CHECK PERMISSIONS: Block Search for Free Users
-        // If any filter is present AND user is NOT premium, return error.
+        // 5. CHECK PERMISSIONS
         const hasFilters = searchId || minAge || maxAge || minHeight || maxHeight || minSalary || education || subCommunity || maritalStatus || occupation;
 
         if (hasFilters && !isViewerPremium) {
@@ -2623,78 +2643,59 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
             });
         }
 
-        // 4. Build Base Query
+        // 6. Build Base Query
         let query = {
             gender: targetGender,
             isApproved: true,
             isActive: true,
             _id: { $ne: req.userId }, // Exclude self
-            // Rule: Only show Paid Members in the feed/search results (Prevent free users from being discovered if that's the policy)
             isPaidMember: true 
         };
 
-        // 5. Apply Search Filters (Only runs if filters exist & user is Premium)
+        // 7. Apply Search Filters
         if (hasFilters) {
-            // --- A. ID SEARCH (Priority) ---
             if (searchId) {
                 query.uniqueId = { $regex: searchId, $options: 'i' };
             } else {
-                // --- B. AGE FILTER ---
                 if (minAge || maxAge) {
                     const today = new Date();
                     query.dob = {};
                     if (maxAge) query.dob.$gte = new Date(new Date().setFullYear(today.getFullYear() - maxAge));
                     if (minAge) query.dob.$lte = new Date(new Date().setFullYear(today.getFullYear() - minAge));
                 }
-
-                // --- C. HEIGHT FILTER ---
                 if (minHeight || maxHeight) {
                     query.height = {};
                     if (minHeight) query.height.$gte = parseFloat(minHeight);
                     if (maxHeight) query.height.$lte = parseFloat(maxHeight);
                 }
-
-                // --- D. SALARY FILTER ---
                 if (minSalary) {
-                    // Assuming annualIncome is stored as Number. If string, this logic changes.
                     query.annualIncome = { $gte: parseFloat(minSalary) };
                 }
-
-                // --- E. EXACT TEXT MATCHES ---
                 if (education) query.highestQualification = education;
                 if (maritalStatus) query.maritalStatus = maritalStatus;
-                
-                // --- F. PARTIAL / OR MATCHES ---
                 if (subCommunity) {
-                    query.$or = [
-                        { caste: subCommunity },
-                        { subCommunity: subCommunity }
-                    ];
+                    query.$or = [{ caste: subCommunity }, { subCommunity: subCommunity }];
                 }
-
                 if (occupation) {
                     query.jobRole = { $regex: occupation, $options: 'i' };
                 }
             }
         }
 
-        // 6. Execute Query
-        // Use 'lean()' for better performance if you don't need Mongoose document methods
+        // 8. Execute Query
         let profilesQuery = User.find(query)
-            .select('firstName lastName dob highestQualification subCommunity city state maritalStatus jobRole uniqueId photos height annualIncome interestStatus') // added interestStatus logic if needed
+            .select('firstName lastName dob highestQualification subCommunity city state maritalStatus jobRole uniqueId photos height annualIncome')
             .sort({ createdAt: -1 });
 
-        // SECURITY: Limit Free Users to 2 Profiles (Teaser Mode)
+        // Limit Free Users
         if (!isViewerPremium) {
             profilesQuery = profilesQuery.limit(2);
         }
 
         const profiles = await profilesQuery;
-        
-        // 7. Get Total Count (Useful for "View 150+ more profiles" message)
         const totalMatches = await User.countDocuments(query);
 
-        // 8. Format Data
+        // 9. Format Data & ATTACH STATUS FROM MAP
         const formattedData = profiles.map(p => {
             let age = "N/A";
             if (p.dob) {
@@ -2703,9 +2704,13 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
                 age = Math.abs(ageDate.getUTCFullYear() - 1970);
             }
 
+            // LOOKUP STATUS using the Map we created in Step 3
+            // If undefined, it means no interaction exists (null)
+            const currentStatus = statusMap[p._id.toString()] || null;
+
             return {
-                id: p._id, // Internal Mongo ID (for API calls)
-                uniqueId: p.uniqueId, // Display ID (KS1023)
+                id: p._id,
+                uniqueId: p.uniqueId,
                 name: `${p.firstName} ${p.lastName}`,
                 age: age,
                 occupation: p.jobRole || "Not Specified",
@@ -2714,9 +2719,11 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
                 location: `${p.city}, ${p.state}`,
                 status: p.maritalStatus,
                 height: p.height,
-                salary: p.annualIncome, // Only if you want to show it
+                salary: p.annualIncome,
                 photo: p.photos && p.photos.length > 0 ? p.photos[0] : null,
-                interestStatus: "PendingUser" // You might want to populate this dynamically based on Interest collection later
+                
+                // DYNAMIC STATUS (Fixes the "Always Pending" issue)
+                interestStatus: currentStatus
             };
         });
 
@@ -2733,6 +2740,8 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+            
+
 
 // ====================================================================
 // SIMPLE CREATE ADMIN (FOR POSTMAN)
