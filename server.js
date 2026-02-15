@@ -20,7 +20,12 @@ const PaymentInterest = require('./models/PaymentInterest');
 const Admin = require('./models/Admin');
 
 const app = express();
-app.use(cors());
+app.use(cors({
+    origin: "*", // Allow all origins (Change to specific frontend URL for production)
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // Allow these methods
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true
+}));
 app.use(express.json({ limit: '50mb' })); 
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
