@@ -2587,7 +2587,7 @@ app.post("/api/admin/users/restrict", verifyAdmin, async (req, res) => {
 });
 
 // ====================================================================
-// USER DASHBOARD: OPPOSITE GENDER FEED
+// USER DASHBOARD: OPPOSITE GENDER FEED (PAID MEMBERS ONLY)
 // ====================================================================
 app.get("/api/user/dashboard/feed", verifyUser, async (req, res) => {
     try {
@@ -2600,14 +2600,15 @@ app.get("/api/user/dashboard/feed", verifyUser, async (req, res) => {
         // 2. Determine Opposite Gender
         const targetGender = currentUser.gender === 'Male' ? 'Female' : 'Male';
 
-        // 3. Find Matches
+        // 3. Find Matches (ONLY PAID MEMBERS)
         const profiles = await User.find({
             gender: targetGender,     // Opposite gender
             isApproved: true,         // Must be approved by admin
             isActive: true,           // Must be active
+            isPaidMember: true,       // <--- ADDED: Only show users who paid registration fee
             _id: { $ne: req.userId }  // Exclude self
         })
-        .select('firstName lastName dob highestQualification subCommunity city state maritalStatus photos') // Only fetch required fields
+        .select('firstName lastName dob highestQualification subCommunity city state maritalStatus photos') 
         .sort({ createdAt: -1 }); // Show newest first
 
         // 4. Format Data (Calculate Age & Structure Response)
