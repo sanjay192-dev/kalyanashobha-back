@@ -568,34 +568,30 @@ const otpStore = {};
 
 app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async (req, res) => {
     try {
-        // When using Multer:
-        // req.body contains text fields
-        // req.file contains the uploaded file
-        const data = req.body; 
+        const data = req.body;
 
         // --- STEP 1: VALIDATION ---
+        // 1. Check for Digital Signature File
         if (!req.file) {
             return res.status(400).json({ 
                 success: false, 
                 message: "Digital Signature file is required." 
             });
         }
-
-        // The Cloudinary URL is automatically provided by Multer here
         const signatureUrl = req.file.path; 
 
+        // 2. Check Password
         if (!data.password) {
             return res.status(400).json({ success: false, message: "Password is required" });
         }
 
-        // Check if user exists
+        // 3. Check if user exists
         const existingUser = await User.findOne({ email: data.email });
         if (existingUser) {
             return res.status(400).json({ success: false, message: "User already exists" });
         }
 
         // --- STEP 2: PREPARE USER DATA ---
-        // Note: data.state might come as a string, make sure it's valid
         const uniqueId = await generateUserId(data.state);
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
@@ -609,10 +605,10 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
             uniqueId, 
             photos: [],
             isEmailVerified: false, 
-            isActive: true,
+            isActive: true, // Auto-active for now, or false if you want admin approval first
 
             // --- LEGAL & SECURITY FIELDS ---
-            digitalSignature: signatureUrl, // Use the Cloudinary URL from the file
+            digitalSignature: signatureUrl, 
             termsAcceptedAt: new Date(),
             termsAcceptedIP: clientIp
         });
@@ -620,27 +616,85 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
         // --- STEP 3: SAVE TO DB ---
         await user.save();
 
-        // --- STEP 4: EMAILS ---
+        // --- STEP 4: PREPARE EMAILS (Your Custom Templates) ---
+
+        // A. Welcome Email Content
         const userWelcomeContent = generateEmailTemplate(
             "Welcome to KalyanaShobha!",
             `<p>Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
-             <p>Thank you for registering. Your account has been created.</p>
-             <p><strong>Your Profile ID:</strong> ${user.uniqueId}</p>`
+             <p>Thank you for registering with us. Your profile has been created successfully.</p>
+             <p><strong>Your Profile ID:</strong> ${user.uniqueId}</p>
+             <p>You can now log in using your email and password to update your profile and upload photos.</p>
+             <div style="text-align: center; margin: 20px 0; padding: 10px; background-color: #f9f9f9; border-radius: 5px;">
+                <p style="color: #555; font-size: 13px;">(Note: For security, you will receive an OTP every time you log in.)</p>
+             </div>`
         );
 
-        // Send Emails (Non-blocking)
-        sendMail({ to: user.email, subject: "Welcome to KalyanaShobha Matrimony", html: userWelcomeContent });
-        sendMail({ 
-            to: process.env.EMAIL_USER, 
-            subject: `New User: ${user.uniqueId}`, 
-            html: `<p>New user registered via app.</p>` 
+        // B. Admin Alert Content (Table Format)
+        const adminAlertContent = generateEmailTemplate(
+            "New User Registration",
+            `<p>A new user has just registered on the platform.</p>
+             <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px;">
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd; width: 40%; color: #666;"><strong>Name:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.firstName} ${user.lastName}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Profile ID:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>${user.uniqueId}</strong></td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Email:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.email}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Mobile:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.mobileNumber}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Location:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.city}, ${user.state}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Gender:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.gender}</td>
+                </tr>
+             </table>
+             <div style="margin-top: 20px; text-align: center;">
+                <a href="https://kalyanashobha-admin.vercel.app" style="background-color: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-size: 14px;">Go to Admin Dashboard</a>
+             </div>`
+        );
+
+        // --- STEP 5: SEND EMAILS (Parallel & Awaited for Vercel) ---
+        
+        // 1. Prepare Promises
+        const sendUserMail = sendMail({ 
+            to: user.email, 
+            subject: "Welcome to KalyanaShobha Matrimony", 
+            html: userWelcomeContent 
         });
 
-        // --- STEP 5: RESPONSE ---
+        const sendAdminMail = sendMail({ 
+            to: process.env.EMAIL_USER, // Sends to your admin email
+            subject: `New User: ${user.uniqueId} (${user.firstName})`, 
+            html: adminAlertContent 
+        });
+
+        // 2. Wait for completion
+        try {
+            await Promise.all([sendUserMail, sendAdminMail]);
+            console.log("Registration emails sent successfully.");
+        } catch (emailError) {
+            console.error("Email Sending Failed:", emailError);
+            // We do not return an error response here, so the user flow isn't interrupted.
+        }
+
+        // --- STEP 6: RESPONSE ---
         res.json({ 
             success: true, 
-            message: "Registration successful!",
-            email: user.email
+            message: "Registration successful! Please login to continue.",
+            email: user.email,
+            uniqueId: user.uniqueId
         });
 
     } catch (e) { 
@@ -648,7 +702,8 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
         res.status(500).json({ success: false, message: e.message }); 
     }
 });
-    
+
+            
                                        
 
 
