@@ -2586,6 +2586,201 @@ app.post("/api/admin/users/restrict", verifyAdmin, async (req, res) => {
     }
 });
 
+// ====================================================================
+// USER DASHBOARD: OPPOSITE GENDER FEED
+// ====================================================================
+app.get("/api/user/dashboard/feed", verifyUser, async (req, res) => {
+    try {
+        // 1. Get Logged-in User to know their Gender
+        const currentUser = await User.findById(req.userId);
+        if (!currentUser) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        // 2. Determine Opposite Gender
+        const targetGender = currentUser.gender === 'Male' ? 'Female' : 'Male';
+
+        // 3. Find Matches
+        const profiles = await User.find({
+            gender: targetGender,     // Opposite gender
+            isApproved: true,         // Must be approved by admin
+            isActive: true,           // Must be active
+            _id: { $ne: req.userId }  // Exclude self
+        })
+        .select('firstName lastName dob highestQualification subCommunity city state maritalStatus photos') // Only fetch required fields
+        .sort({ createdAt: -1 }); // Show newest first
+
+        // 4. Format Data (Calculate Age & Structure Response)
+        const formattedProfiles = profiles.map(p => {
+            // Calculate Age from DOB
+            let age = "N/A";
+            if (p.dob) {
+                const diff = Date.now() - new Date(p.dob).getTime();
+                const ageDate = new Date(diff);
+                age = Math.abs(ageDate.getUTCFullYear() - 1970);
+            }
+
+            return {
+                id: p._id,
+                name: `${p.firstName} ${p.lastName}`,
+                age: age,
+                education: p.highestQualification || "Not Specified",
+                subCommunity: p.subCommunity || "Not Specified",
+                location: `${p.city}, ${p.state}`,
+                status: p.maritalStatus, // e.g., Married, Never Married
+                photo: p.photos && p.photos.length > 0 ? p.photos[0] : null // Show first photo
+            };
+        });
+
+        res.json({ 
+            success: true, 
+            count: formattedProfiles.length, 
+            data: formattedProfiles 
+        });
+
+    } catch (e) {
+        console.error("Dashboard Feed Error:", e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+
+// ====================================================================
+// USER SEARCH: ADVANCED FILTERS
+// ====================================================================
+app.post("/api/user/search-matches", verifyUser, async (req, res) => {
+    try {
+        const currentUser = await User.findById(req.userId);
+        const targetGender = currentUser.gender === 'Male' ? 'Female' : 'Male';
+
+        const {
+            // Ranges
+            minAge, maxAge,
+            minHeight, maxHeight,
+            minSalary, // Assuming you store annualIncome as string or number, this might need parsing
+            
+            // Strict / Exact Matches
+            education, // "highestQualification" in DB
+            subCommunity, // "caste" or "subCommunity" in DB
+            maritalStatus,
+            
+            // Specifics
+            occupation, // "jobRole" in DB
+            searchId    // "uniqueId"
+        } = req.body;
+
+        // 1. Base Query (Opposite Gender + Approved)
+        let query = {
+            gender: targetGender,
+            isApproved: true,
+            isActive: true
+        };
+
+        // --- A. ID SEARCH (If ID is provided, ignore other filters) ---
+        if (searchId) {
+            query.uniqueId = { $regex: searchId, $options: 'i' }; // Case insensitive search
+        } else {
+            // --- B. AGE FILTER (Calculated via DOB) ---
+            if (minAge || maxAge) {
+                const today = new Date();
+                query.dob = {};
+                
+                // Example: If Max Age is 30, they must be born BEFORE 30 years ago
+                if (maxAge) {
+                    const maxDate = new Date(new Date().setFullYear(today.getFullYear() - maxAge));
+                    query.dob.$gte = maxDate; 
+                }
+                // Example: If Min Age is 20, they must be born AFTER 20 years ago
+                if (minAge) {
+                    const minDate = new Date(new Date().setFullYear(today.getFullYear() - minAge));
+                    query.dob.$lte = minDate;
+                }
+            }
+
+            // --- C. HEIGHT FILTER ---
+            if (minHeight || maxHeight) {
+                query.height = {};
+                if (minHeight) query.height.$gte = parseFloat(minHeight);
+                if (maxHeight) query.height.$lte = parseFloat(maxHeight);
+            }
+
+            // --- D. STRICT MATCHES (Education & Community) ---
+            // If user sends education, match exactly. 
+            if (education) {
+                query.highestQualification = education; 
+            }
+            
+            // Logic for "Caste both same only" (As per your request)
+            // If the user selects a caste, use that. If not, you can optionally restrict to their own caste.
+            if (subCommunity) {
+                // Search by the provided caste/subCommunity
+                query.$or = [
+                    { caste: subCommunity },
+                    { subCommunity: subCommunity }
+                ];
+            }
+
+            // --- E. OTHER FILTERS ---
+            if (maritalStatus) {
+                query.maritalStatus = maritalStatus;
+            }
+
+            if (occupation) {
+                // Partial match for job (e.g., searching "Soft" finds "Software Engineer")
+                query.jobRole = { $regex: occupation, $options: 'i' };
+            }
+            
+            // Salary Logic (Handling string ranges like "5-10 LPA" is complex, 
+            // assuming strict string match or basic logic here)
+            if (minSalary) {
+                query.annualIncome = { $ne: null }; // Basic check to ensure field exists
+                // Note: To do numeric salary comparison, annualIncome in DB should be a Number.
+                // If it is a string like "100000", we can try:
+                // query.annualIncome = { $gte: minSalary }; 
+            }
+        }
+
+        // 2. Execute Query
+        const results = await User.find(query)
+            .select('firstName lastName uniqueId dob highestQualification caste subCommunity jobRole maritalStatus annualIncome height city state photos');
+
+        // 3. Format Response (Add Age Calculation)
+        const formattedResults = results.map(p => {
+            let age = "N/A";
+            if (p.dob) {
+                const diff = Date.now() - new Date(p.dob).getTime();
+                const ageDate = new Date(diff);
+                age = Math.abs(ageDate.getUTCFullYear() - 1970);
+            }
+
+            return {
+                id: p._id,
+                uniqueId: p.uniqueId,
+                name: `${p.firstName} ${p.lastName}`,
+                age: age,
+                height: p.height,
+                education: p.highestQualification,
+                community: `${p.caste} / ${p.subCommunity}`,
+                occupation: p.jobRole,
+                salary: p.annualIncome,
+                maritalStatus: p.maritalStatus,
+                location: `${p.city}, ${p.state}`,
+                photo: p.photos && p.photos.length > 0 ? p.photos[0] : null
+            };
+        });
+
+        res.json({ 
+            success: true, 
+            count: formattedResults.length, 
+            data: formattedResults 
+        });
+
+    } catch (e) {
+        console.error("Advanced Search Error:", e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+                                           
 
 // ====================================================================
 // SIMPLE CREATE ADMIN (FOR POSTMAN)
