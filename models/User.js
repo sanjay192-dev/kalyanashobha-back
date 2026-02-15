@@ -61,6 +61,11 @@ const UserSchema = new mongoose.Schema({
   rejectionReason: { type: String },   
 
   fcmToken: { type: String },
+
+digitalSignature: { type: String },   
+verificationSelfie: { type: String },
+termsAcceptedAt: { type: Date },
+termsAcceptedIP: { type: String },
   createdAt: { type: Date, default: Date.now }
 });
 
