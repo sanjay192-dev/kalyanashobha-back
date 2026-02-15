@@ -545,102 +545,133 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 
 const otpStore = {}; 
 
-
-// 1. REGISTER (Single Step: Save, Email User, Email Admin)
-// 1. REGISTER (Single Step: Save, Email User, Email Admin)
+// 1. REGISTER (Updated with Signature & Selfie Upload)
 app.post("/api/auth/register", async (req, res) => {
     try {
-        const data = req.body;
+        // Extract standard data and the specific image fields from body
+        const { digitalSignature, verificationSelfie, ...data } = req.body;
+
+        // --- STEP 1: VALIDATION ---
+        // Ensure legal proofs are present
+        if (!digitalSignature || !verificationSelfie) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Digital Signature and Verification Selfie are required." 
+            });
+        }
+
+        if (!data.password) {
+            return res.status(400).json({ success: false, message: "Password is required" });
+        }
 
         // Check if user exists
         const existingUser = await User.findOne({ email: data.email });
-        if (existingUser) return res.status(400).json({ success: false, message: "User already exists" });
+        if (existingUser) {
+            return res.status(400).json({ success: false, message: "User already exists" });
+        }
 
+        // --- STEP 2: CLOUDINARY UPLOADS ---
+        // We upload these BEFORE creating the user. If upload fails, registration fails.
+        let signatureUrl = "";
+        let selfieUrl = "";
+
+        try {
+            // Upload Signature
+            const sigUpload = await cloudinary.uploader.upload(digitalSignature, {
+                folder: "matrimony_signatures",
+                resource_type: "image"
+            });
+            signatureUrl = sigUpload.secure_url;
+
+            // Upload Selfie
+            const selfieUpload = await cloudinary.uploader.upload(verificationSelfie, {
+                folder: "matrimony_verifications",
+                resource_type: "image"
+            });
+            selfieUrl = selfieUpload.secure_url;
+
+        } catch (uploadError) {
+            console.error("Cloudinary Upload Error:", uploadError);
+            return res.status(500).json({ 
+                success: false, 
+                message: "Failed to upload verification images. Please try again." 
+            });
+        }
+
+        // --- STEP 3: PREPARE USER DATA ---
         const uniqueId = await generateUserId(data.state);
-
-        if (!data.password) return res.status(400).json({ success: false, message: "Password is required" });
-
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
 
-        // Create User
+        // Get Client IP (Handles proxies like Heroku/Nginx)
+        const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+        // Create User Instance
         const user = new User({ 
             ...data, 
             password: hashedPassword, 
             uniqueId, 
             photos: [],
             isEmailVerified: false, 
-            isActive: true 
+            isActive: true,
+
+            // --- LEGAL & SECURITY FIELDS ---
+            digitalSignature: signatureUrl,
+            verificationSelfie: selfieUrl,
+            termsAcceptedAt: new Date(),
+            termsAcceptedIP: clientIp
         });
 
+        // --- STEP 4: SAVE TO DB ---
         await user.save();
 
-        // --- EMAIL 1: WELCOME MESSAGE TO USER ---
+        // --- STEP 5: EMAILS ---
+        
+        // Email 1: User Welcome
         const userWelcomeContent = generateEmailTemplate(
             "Welcome to KalyanaShobha!",
             `<p>Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
-             <p>Thank you for registering with us. Your profile has been created successfully.</p>
+             <p>Thank you for registering. Your account has been created.</p>
              <p><strong>Your Profile ID:</strong> ${user.uniqueId}</p>
-             <p>You can now log in using your email and password to update your profile and upload photos.</p>
+             <p>We have successfully recorded your digital signature and identity verification.</p>
              <div style="text-align: center; margin: 20px 0;">
                 <p style="color: #555;">(Note: For security, you will receive an OTP every time you log in.)</p>
              </div>`
         );
 
-        // --- EMAIL 2: NEW REGISTRATION ALERT TO ADMIN ---
+        // Email 2: Admin Alert (Now includes info about verification)
         const adminAlertContent = generateEmailTemplate(
             "New User Registration",
-            `<p>A new user has just registered on the platform.</p>
+            `<p>A new user has registered and submitted verification details.</p>
              <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
                 <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Name:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.firstName} ${user.lastName}</td></tr>
-                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Profile ID:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.uniqueId}</td></tr>
-                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Email:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.email}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>ID:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.uniqueId}</td></tr>
                 <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Mobile:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.mobileNumber}</td></tr>
-                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>State/City:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.state}, ${user.city}</td></tr>
-                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Gender:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.gender}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Verified:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd; color: green;"><strong>Yes (Sig + Selfie)</strong></td></tr>
              </table>
-             <p style="margin-top: 15px;">Please login to the Admin Dashboard to review/approve this profile.</p>`
+             <p style="margin-top: 15px;">Please login to Admin Dashboard to review the profile and verification images.</p>`
         );
 
-        // ---------------------------------------------------------
-        // CORRECTION START: Wait for emails to send parallelly
-        // ---------------------------------------------------------
-        
-        // 1. Create the promises (start the sending process)
-        const sendUserMail = sendMail({ 
-            to: user.email, 
-            subject: "Welcome to KalyanaShobha Matrimony", 
-            html: userWelcomeContent 
-        });
-
-        const sendAdminMail = sendMail({ 
-            to: process.env.EMAIL_USER, 
-            subject: `New User: ${user.uniqueId} (${user.firstName})`, 
-            html: adminAlertContent 
-        });
-
-        // 2. Wait for both to complete
-        // If we don't await here, res.json() kills the process before emails send
+        // Send Emails in Parallel
         try {
-            await Promise.all([sendUserMail, sendAdminMail]);
+            await Promise.all([
+                sendMail({ to: user.email, subject: "Welcome to KalyanaShobha Matrimony", html: userWelcomeContent }),
+                sendMail({ to: process.env.EMAIL_USER, subject: `New User: ${user.uniqueId} (${user.firstName})`, html: adminAlertContent })
+            ]);
             console.log("Both registration emails sent successfully.");
         } catch (emailError) {
             console.error("Warning: Emails failed to send, but user was created.", emailError);
-            // We do NOT return an error to the user here, because the account WAS created.
         }
 
-        // ---------------------------------------------------------
-        // CORRECTION END
-        // ---------------------------------------------------------
-
+        // --- STEP 6: RESPONSE ---
         res.json({ 
             success: true, 
-            message: "Registration successful! Please login to continue.",
+            message: "Registration successful! Verification data saved.",
             email: user.email
         });
 
     } catch (e) { 
-        console.error(e);
+        console.error("Register Error:", e);
         res.status(500).json({ success: false, message: e.message }); 
     }
 });
