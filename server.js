@@ -2587,51 +2587,115 @@ app.post("/api/admin/users/restrict", verifyAdmin, async (req, res) => {
     }
 });
 
-
+                    
 // ====================================================================
-// USER DASHBOARD: SECURE FEED (Logic on Server)
+// UNIFIED DASHBOARD & SEARCH API
 // ====================================================================
-app.get("/api/user/dashboard/feed", verifyUser, async (req, res) => {
+app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
     try {
-        // 1. Get Logged-in User
+        // 1. Get Current User & Status
         const currentUser = await User.findById(req.userId);
-        if (!currentUser) {
-            return res.status(404).json({ success: false, message: "User not found" });
-        }
+        if (!currentUser) return res.status(404).json({ success: false, message: "User not found" });
 
-        // 2. Determine Opposite Gender
+        const isViewerPremium = currentUser.isPaidMember;
         const targetGender = currentUser.gender === 'Male' ? 'Female' : 'Male';
 
-        // 3. Build Query
-        // Rule: "Free users won't appear in search" -> so we filter targets by isPaidMember: true
-        const query = {
+        // 2. Destructure Filters from Body
+        const {
+            searchId,
+            minAge, maxAge,
+            minHeight, maxHeight,
+            minSalary,
+            education,
+            subCommunity,
+            maritalStatus,
+            occupation
+        } = req.body;
+
+        // 3. CHECK PERMISSIONS: Block Search for Free Users
+        // If any filter is present AND user is NOT premium, return error.
+        const hasFilters = searchId || minAge || maxAge || minHeight || maxHeight || minSalary || education || subCommunity || maritalStatus || occupation;
+
+        if (hasFilters && !isViewerPremium) {
+            return res.status(403).json({ 
+                success: false, 
+                message: "Search is a Premium feature. Please upgrade to filter matches." 
+            });
+        }
+
+        // 4. Build Base Query
+        let query = {
             gender: targetGender,
             isApproved: true,
             isActive: true,
-            isPaidMember: true,       // Only show paid members in the feed
-            _id: { $ne: req.userId }  // Exclude self
+            _id: { $ne: req.userId }, // Exclude self
+            // Rule: Only show Paid Members in the feed/search results (Prevent free users from being discovered if that's the policy)
+            isPaidMember: true 
         };
 
-        // 4. Check Viewer Status
-        const isViewerPaid = currentUser.isPaidMember;
+        // 5. Apply Search Filters (Only runs if filters exist & user is Premium)
+        if (hasFilters) {
+            // --- A. ID SEARCH (Priority) ---
+            if (searchId) {
+                query.uniqueId = { $regex: searchId, $options: 'i' };
+            } else {
+                // --- B. AGE FILTER ---
+                if (minAge || maxAge) {
+                    const today = new Date();
+                    query.dob = {};
+                    if (maxAge) query.dob.$gte = new Date(new Date().setFullYear(today.getFullYear() - maxAge));
+                    if (minAge) query.dob.$lte = new Date(new Date().setFullYear(today.getFullYear() - minAge));
+                }
 
-        // 5. Fetch Profiles (Securely Limit Data)
+                // --- C. HEIGHT FILTER ---
+                if (minHeight || maxHeight) {
+                    query.height = {};
+                    if (minHeight) query.height.$gte = parseFloat(minHeight);
+                    if (maxHeight) query.height.$lte = parseFloat(maxHeight);
+                }
+
+                // --- D. SALARY FILTER ---
+                if (minSalary) {
+                    // Assuming annualIncome is stored as Number. If string, this logic changes.
+                    query.annualIncome = { $gte: parseFloat(minSalary) };
+                }
+
+                // --- E. EXACT TEXT MATCHES ---
+                if (education) query.highestQualification = education;
+                if (maritalStatus) query.maritalStatus = maritalStatus;
+                
+                // --- F. PARTIAL / OR MATCHES ---
+                if (subCommunity) {
+                    query.$or = [
+                        { caste: subCommunity },
+                        { subCommunity: subCommunity }
+                    ];
+                }
+
+                if (occupation) {
+                    query.jobRole = { $regex: occupation, $options: 'i' };
+                }
+            }
+        }
+
+        // 6. Execute Query
+        // Use 'lean()' for better performance if you don't need Mongoose document methods
         let profilesQuery = User.find(query)
-            .select('firstName lastName dob highestQualification subCommunity city state maritalStatus jobRole uniqueId photos')
+            .select('firstName lastName dob highestQualification subCommunity city state maritalStatus jobRole uniqueId photos height annualIncome interestStatus') // added interestStatus logic if needed
             .sort({ createdAt: -1 });
 
-        // SECURITY: If viewer is FREE, ONLY fetch 2 profiles from Database.
-        if (!isViewerPaid) {
+        // SECURITY: Limit Free Users to 2 Profiles (Teaser Mode)
+        if (!isViewerPremium) {
             profilesQuery = profilesQuery.limit(2);
         }
 
         const profiles = await profilesQuery;
-
-        // 6. Get Total Count (Optional: To show "100+ more profiles" on the lock card)
+        
+        // 7. Get Total Count (Useful for "View 150+ more profiles" message)
         const totalMatches = await User.countDocuments(query);
 
-        // 7. Format Data
-        const formattedProfiles = profiles.map(p => {
+        // 8. Format Data
+        const formattedData = profiles.map(p => {
             let age = "N/A";
             if (p.dob) {
                 const diff = Date.now() - new Date(p.dob).getTime();
@@ -2640,169 +2704,35 @@ app.get("/api/user/dashboard/feed", verifyUser, async (req, res) => {
             }
 
             return {
-                id: p.uniqueId,
-                occupation:p.jobRole,
+                id: p._id, // Internal Mongo ID (for API calls)
+                uniqueId: p.uniqueId, // Display ID (KS1023)
                 name: `${p.firstName} ${p.lastName}`,
                 age: age,
+                occupation: p.jobRole || "Not Specified",
                 education: p.highestQualification || "Not Specified",
                 subCommunity: p.subCommunity || "Not Specified",
                 location: `${p.city}, ${p.state}`,
                 status: p.maritalStatus,
-                photo: p.photos && p.photos.length > 0 ? p.photos[0] : null
-            };
-        });
-
-        res.json({ 
-            success: true, 
-            isPremium: isViewerPaid, // Send status to frontend
-            count: formattedProfiles.length,
-            totalAvailable: totalMatches, // Total profiles existing in DB (for the "Unlock" card text)
-            data: formattedProfiles 
-        });
-
-    } catch (e) {
-        console.error("Dashboard Feed Error:", e);
-        res.status(500).json({ success: false, message: "Server Error" });
-    }
-});
-
-
-// ====================================================================
-// USER SEARCH: ADVANCED FILTERS
-// ====================================================================
-app.post("/api/user/search-matches", verifyUser, async (req, res) => {
-    try {
-        const currentUser = await User.findById(req.userId);
-        const targetGender = currentUser.gender === 'Male' ? 'Female' : 'Male';
-
-        const {
-            // Ranges
-            minAge, maxAge,
-            minHeight, maxHeight,
-            minSalary, // Assuming you store annualIncome as string or number, this might need parsing
-            
-            // Strict / Exact Matches
-            education, // "highestQualification" in DB
-            subCommunity, // "caste" or "subCommunity" in DB
-            maritalStatus,
-            
-            // Specifics
-            occupation, // "jobRole" in DB
-            searchId    // "uniqueId"
-        } = req.body;
-
-        // 1. Base Query (Opposite Gender + Approved)
-        let query = {
-            gender: targetGender,
-            isApproved: true,
-            isActive: true
-        };
-
-        // --- A. ID SEARCH (If ID is provided, ignore other filters) ---
-        if (searchId) {
-            query.uniqueId = { $regex: searchId, $options: 'i' }; // Case insensitive search
-        } else {
-            // --- B. AGE FILTER (Calculated via DOB) ---
-            if (minAge || maxAge) {
-                const today = new Date();
-                query.dob = {};
-                
-                // Example: If Max Age is 30, they must be born BEFORE 30 years ago
-                if (maxAge) {
-                    const maxDate = new Date(new Date().setFullYear(today.getFullYear() - maxAge));
-                    query.dob.$gte = maxDate; 
-                }
-                // Example: If Min Age is 20, they must be born AFTER 20 years ago
-                if (minAge) {
-                    const minDate = new Date(new Date().setFullYear(today.getFullYear() - minAge));
-                    query.dob.$lte = minDate;
-                }
-            }
-
-            // --- C. HEIGHT FILTER ---
-            if (minHeight || maxHeight) {
-                query.height = {};
-                if (minHeight) query.height.$gte = parseFloat(minHeight);
-                if (maxHeight) query.height.$lte = parseFloat(maxHeight);
-            }
-
-            // --- D. STRICT MATCHES (Education & Community) ---
-            // If user sends education, match exactly. 
-            if (education) {
-                query.highestQualification = education; 
-            }
-            
-            // Logic for "Caste both same only" (As per your request)
-            // If the user selects a caste, use that. If not, you can optionally restrict to their own caste.
-            if (subCommunity) {
-                // Search by the provided caste/subCommunity
-                query.$or = [
-                    { caste: subCommunity },
-                    { subCommunity: subCommunity }
-                ];
-            }
-
-            // --- E. OTHER FILTERS ---
-            if (maritalStatus) {
-                query.maritalStatus = maritalStatus;
-            }
-
-            if (occupation) {
-                // Partial match for job (e.g., searching "Soft" finds "Software Engineer")
-                query.jobRole = { $regex: occupation, $options: 'i' };
-            }
-            
-            // Salary Logic (Handling string ranges like "5-10 LPA" is complex, 
-            // assuming strict string match or basic logic here)
-            if (minSalary) {
-                query.annualIncome = { $ne: null }; // Basic check to ensure field exists
-                // Note: To do numeric salary comparison, annualIncome in DB should be a Number.
-                // If it is a string like "100000", we can try:
-                // query.annualIncome = { $gte: minSalary }; 
-            }
-        }
-
-        // 2. Execute Query
-        const results = await User.find(query)
-            .select('firstName lastName uniqueId dob highestQualification caste subCommunity jobRole maritalStatus annualIncome height city state photos');
-
-        // 3. Format Response (Add Age Calculation)
-        const formattedResults = results.map(p => {
-            let age = "N/A";
-            if (p.dob) {
-                const diff = Date.now() - new Date(p.dob).getTime();
-                const ageDate = new Date(diff);
-                age = Math.abs(ageDate.getUTCFullYear() - 1970);
-            }
-
-            return {
-                id: p._id,
-                uniqueId: p.uniqueId,
-                name: `${p.firstName} ${p.lastName}`,
-                age: age,
                 height: p.height,
-                education: p.highestQualification,
-                community: `${p.caste} / ${p.subCommunity}`,
-                occupation: p.jobRole,
-                salary: p.annualIncome,
-                maritalStatus: p.maritalStatus,
-                location: `${p.city}, ${p.state}`,
-                photo: p.photos && p.photos.length > 0 ? p.photos[0] : null
+                salary: p.annualIncome, // Only if you want to show it
+                photo: p.photos && p.photos.length > 0 ? p.photos[0] : null,
+                interestStatus: "PendingUser" // You might want to populate this dynamically based on Interest collection later
             };
         });
 
         res.json({ 
             success: true, 
-            count: formattedResults.length, 
-            data: formattedResults 
+            isPremium: isViewerPremium,
+            count: formattedData.length,
+            totalAvailable: totalMatches, 
+            data: formattedData 
         });
 
     } catch (e) {
-        console.error("Advanced Search Error:", e);
+        console.error("Unified Feed Error:", e);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-                                           
 
 // ====================================================================
 // SIMPLE CREATE ADMIN (FOR POSTMAN)
