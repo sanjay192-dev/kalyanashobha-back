@@ -2568,7 +2568,8 @@ app.post("/api/admin/users/restrict", verifyAdmin, async (req, res) => {
                  <p>You will no longer be able to log in.</p>
                  <p>Please contact support if you believe this is an error.</p>`
             );
-            sendMail({ to: user.email, subject: "Account Status Update", html: emailContent });
+            sendMail({ to: user.email, subject: "Account Status Update"
+                      , html: emailContent });
         } else {
              const emailContent = generateEmailTemplate(
                 "Account Access Restored",
@@ -2586,12 +2587,13 @@ app.post("/api/admin/users/restrict", verifyAdmin, async (req, res) => {
     }
 });
 
+
 // ====================================================================
-// USER DASHBOARD: OPPOSITE GENDER FEED (PAID MEMBERS ONLY)
+// USER DASHBOARD: SECURE FEED (Logic on Server)
 // ====================================================================
 app.get("/api/user/dashboard/feed", verifyUser, async (req, res) => {
     try {
-        // 1. Get Logged-in User to know their Gender
+        // 1. Get Logged-in User
         const currentUser = await User.findById(req.userId);
         if (!currentUser) {
             return res.status(404).json({ success: false, message: "User not found" });
@@ -2600,20 +2602,36 @@ app.get("/api/user/dashboard/feed", verifyUser, async (req, res) => {
         // 2. Determine Opposite Gender
         const targetGender = currentUser.gender === 'Male' ? 'Female' : 'Male';
 
-        // 3. Find Matches (ONLY PAID MEMBERS)
-        const profiles = await User.find({
-            gender: targetGender,     // Opposite gender
-            isApproved: true,         // Must be approved by admin
-            isActive: true,           // Must be active
-            isPaidMember: true,       // <--- ADDED: Only show users who paid registration fee
+        // 3. Build Query
+        // Rule: "Free users won't appear in search" -> so we filter targets by isPaidMember: true
+        const query = {
+            gender: targetGender,
+            isApproved: true,
+            isActive: true,
+            isPaidMember: true,       // Only show paid members in the feed
             _id: { $ne: req.userId }  // Exclude self
-        })
-        .select('firstName lastName dob highestQualification subCommunity city state maritalStatus photos') 
-        .sort({ createdAt: -1 }); // Show newest first
+        };
 
-        // 4. Format Data (Calculate Age & Structure Response)
+        // 4. Check Viewer Status
+        const isViewerPaid = currentUser.isPaidMember;
+
+        // 5. Fetch Profiles (Securely Limit Data)
+        let profilesQuery = User.find(query)
+            .select('firstName lastName dob highestQualification subCommunity city state maritalStatus photos')
+            .sort({ createdAt: -1 });
+
+        // SECURITY: If viewer is FREE, ONLY fetch 2 profiles from Database.
+        if (!isViewerPaid) {
+            profilesQuery = profilesQuery.limit(2);
+        }
+
+        const profiles = await profilesQuery;
+
+        // 6. Get Total Count (Optional: To show "100+ more profiles" on the lock card)
+        const totalMatches = await User.countDocuments(query);
+
+        // 7. Format Data
         const formattedProfiles = profiles.map(p => {
-            // Calculate Age from DOB
             let age = "N/A";
             if (p.dob) {
                 const diff = Date.now() - new Date(p.dob).getTime();
@@ -2628,14 +2646,16 @@ app.get("/api/user/dashboard/feed", verifyUser, async (req, res) => {
                 education: p.highestQualification || "Not Specified",
                 subCommunity: p.subCommunity || "Not Specified",
                 location: `${p.city}, ${p.state}`,
-                status: p.maritalStatus, // e.g., Married, Never Married
-                photo: p.photos && p.photos.length > 0 ? p.photos[0] : null // Show first photo
+                status: p.maritalStatus,
+                photo: p.photos && p.photos.length > 0 ? p.photos[0] : null
             };
         });
 
         res.json({ 
             success: true, 
-            count: formattedProfiles.length, 
+            isPremium: isViewerPaid, // Send status to frontend
+            count: formattedProfiles.length,
+            totalAvailable: totalMatches, // Total profiles existing in DB (for the "Unlock" card text)
             data: formattedProfiles 
         });
 
