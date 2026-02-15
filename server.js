@@ -2617,7 +2617,7 @@ app.get("/api/user/dashboard/feed", verifyUser, async (req, res) => {
 
         // 5. Fetch Profiles (Securely Limit Data)
         let profilesQuery = User.find(query)
-            .select('firstName lastName dob highestQualification subCommunity city state maritalStatus photos')
+            .select('firstName lastName dob highestQualification subCommunity city state maritalStatus uniqueId photos')
             .sort({ createdAt: -1 });
 
         // SECURITY: If viewer is FREE, ONLY fetch 2 profiles from Database.
@@ -2640,7 +2640,7 @@ app.get("/api/user/dashboard/feed", verifyUser, async (req, res) => {
             }
 
             return {
-                id: p._id,
+                id: p.uniqueId,
                 name: `${p.firstName} ${p.lastName}`,
                 age: age,
                 education: p.highestQualification || "Not Specified",
