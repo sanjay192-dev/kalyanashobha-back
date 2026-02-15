@@ -90,6 +90,18 @@ const vendorStorage = new CloudinaryStorage({
 });
 const uploadVendor = multer({ storage: vendorStorage });
 
+
+// New Storage for Signatures
+const signatureStorage = new CloudinaryStorage({
+    cloudinary,
+    params: { 
+        folder: "matrimony_signatures", 
+        allowed_formats: ["png", "jpg", "jpeg"] 
+    }
+});
+const uploadSignature = multer({ storage: signatureStorage });
+
+
 // ---------------- EMAIL SYSTEM (PROFESSIONAL) ----------------
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -550,21 +562,25 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 
 const otpStore = {}; 
 
-// 1. REGISTER 
-app.post("/api/auth/register", async (req, res) => {
+// 1. REGISTER (Updated to use Multer for Multipart Upload)
+
+app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async (req, res) => {
     try {
-        // Extract digitalSignature. 
-        // We also extract 'verificationSelfie' to remove it from 'data', ensuring we don't save raw base64 strings if the frontend still sends them.
-        const { digitalSignature, verificationSelfie, ...data } = req.body;
+        // When using Multer:
+        // req.body contains text fields
+        // req.file contains the uploaded file
+        const data = req.body; 
 
         // --- STEP 1: VALIDATION ---
-        // Ensure Digital Signature is present
-        if (!digitalSignature) {
+        if (!req.file) {
             return res.status(400).json({ 
                 success: false, 
-                message: "Digital Signature is required to accept Terms & Conditions." 
+                message: "Digital Signature file is required." 
             });
         }
+
+        // The Cloudinary URL is automatically provided by Multer here
+        const signatureUrl = req.file.path; 
 
         if (!data.password) {
             return res.status(400).json({ success: false, message: "Password is required" });
@@ -576,31 +592,12 @@ app.post("/api/auth/register", async (req, res) => {
             return res.status(400).json({ success: false, message: "User already exists" });
         }
 
-        // --- STEP 2: CLOUDINARY UPLOAD ---
-        // Upload ONLY the Signature
-        let signatureUrl = "";
-
-        try {
-            const sigUpload = await cloudinary.uploader.upload(digitalSignature, {
-                folder: "matrimony_signatures",
-                resource_type: "image"
-            });
-            signatureUrl = sigUpload.secure_url;
-
-        } catch (uploadError) {
-            console.error("Cloudinary Upload Error:", uploadError);
-            return res.status(500).json({ 
-                success: false, 
-                message: "Failed to upload digital signature. Please try again." 
-            });
-        }
-
-        // --- STEP 3: PREPARE USER DATA ---
+        // --- STEP 2: PREPARE USER DATA ---
+        // Note: data.state might come as a string, make sure it's valid
         const uniqueId = await generateUserId(data.state);
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
-
-        // Get Client IP
+        
         const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
         // Create User Instance
@@ -613,54 +610,31 @@ app.post("/api/auth/register", async (req, res) => {
             isActive: true,
 
             // --- LEGAL & SECURITY FIELDS ---
-            digitalSignature: signatureUrl,
-            // verificationSelfie is REMOVED
+            digitalSignature: signatureUrl, // Use the Cloudinary URL from the file
             termsAcceptedAt: new Date(),
             termsAcceptedIP: clientIp
         });
 
-        // --- STEP 4: SAVE TO DB ---
+        // --- STEP 3: SAVE TO DB ---
         await user.save();
 
-        // --- STEP 5: EMAILS ---
-        
-        // Email 1: User Welcome
+        // --- STEP 4: EMAILS ---
         const userWelcomeContent = generateEmailTemplate(
             "Welcome to KalyanaShobha!",
             `<p>Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
              <p>Thank you for registering. Your account has been created.</p>
-             <p><strong>Your Profile ID:</strong> ${user.uniqueId}</p>
-             <p>We have successfully recorded your digital signature as acceptance of our Terms & Conditions.</p>
-             <div style="text-align: center; margin: 20px 0;">
-                <p style="color: #555;">(Note: For security, you will receive an OTP every time you log in.)</p>
-             </div>`
+             <p><strong>Your Profile ID:</strong> ${user.uniqueId}</p>`
         );
 
-        // Email 2: Admin Alert
-        const adminAlertContent = generateEmailTemplate(
-            "New User Registration",
-            `<p>A new user has registered.</p>
-             <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
-                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Name:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.firstName} ${user.lastName}</td></tr>
-                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>ID:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.uniqueId}</td></tr>
-                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Mobile:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.mobileNumber}</td></tr>
-                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Legal:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd; color: green;"><strong>Terms Accepted (Signed)</strong></td></tr>
-             </table>
-             <p style="margin-top: 15px;">Please login to Admin Dashboard to review the profile.</p>`
-        );
+        // Send Emails (Non-blocking)
+        sendMail({ to: user.email, subject: "Welcome to KalyanaShobha Matrimony", html: userWelcomeContent });
+        sendMail({ 
+            to: process.env.EMAIL_USER, 
+            subject: `New User: ${user.uniqueId}`, 
+            html: `<p>New user registered via app.</p>` 
+        });
 
-        // Send Emails in Parallel
-        try {
-            await Promise.all([
-                sendMail({ to: user.email, subject: "Welcome to KalyanaShobha Matrimony", html: userWelcomeContent }),
-                sendMail({ to: process.env.EMAIL_USER, subject: `New User: ${user.uniqueId} (${user.firstName})`, html: adminAlertContent })
-            ]);
-            console.log("Both registration emails sent successfully.");
-        } catch (emailError) {
-            console.error("Warning: Emails failed to send, but user was created.", emailError);
-        }
-
-        // --- STEP 6: RESPONSE ---
+        // --- STEP 5: RESPONSE ---
         res.json({ 
             success: true, 
             message: "Registration successful!",
@@ -672,9 +646,7 @@ app.post("/api/auth/register", async (req, res) => {
         res.status(500).json({ success: false, message: e.message }); 
     }
 });
-                 
-        
-
+    
                                        
 
 
