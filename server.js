@@ -20,11 +20,13 @@ const PaymentInterest = require('./models/PaymentInterest');
 const Admin = require('./models/Admin');
 
 const app = express();
+// Allow all headers and origins to fix the browser blocking issue
 app.use(cors({
     origin: "*", 
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"]
+    allowedHeaders: "*" 
 }));
+
 app.use(express.json({ limit: '50mb' })); 
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
