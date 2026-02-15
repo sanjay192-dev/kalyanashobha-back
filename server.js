@@ -546,18 +546,19 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 
 const otpStore = {}; 
 
-// 1. REGISTER (Updated with Signature & Selfie Upload)
+// 1. REGISTER 
 app.post("/api/auth/register", async (req, res) => {
     try {
-        // Extract standard data and the specific image fields from body
+        // Extract digitalSignature. 
+        // We also extract 'verificationSelfie' to remove it from 'data', ensuring we don't save raw base64 strings if the frontend still sends them.
         const { digitalSignature, verificationSelfie, ...data } = req.body;
 
         // --- STEP 1: VALIDATION ---
-        // Ensure legal proofs are present
-        if (!digitalSignature || !verificationSelfie) {
+        // Ensure Digital Signature is present
+        if (!digitalSignature) {
             return res.status(400).json({ 
                 success: false, 
-                message: "Digital Signature and Verification Selfie are required." 
+                message: "Digital Signature is required to accept Terms & Conditions." 
             });
         }
 
@@ -571,31 +572,22 @@ app.post("/api/auth/register", async (req, res) => {
             return res.status(400).json({ success: false, message: "User already exists" });
         }
 
-        // --- STEP 2: CLOUDINARY UPLOADS ---
-        // We upload these BEFORE creating the user. If upload fails, registration fails.
+        // --- STEP 2: CLOUDINARY UPLOAD ---
+        // Upload ONLY the Signature
         let signatureUrl = "";
-        let selfieUrl = "";
 
         try {
-            // Upload Signature
             const sigUpload = await cloudinary.uploader.upload(digitalSignature, {
                 folder: "matrimony_signatures",
                 resource_type: "image"
             });
             signatureUrl = sigUpload.secure_url;
 
-            // Upload Selfie
-            const selfieUpload = await cloudinary.uploader.upload(verificationSelfie, {
-                folder: "matrimony_verifications",
-                resource_type: "image"
-            });
-            selfieUrl = selfieUpload.secure_url;
-
         } catch (uploadError) {
             console.error("Cloudinary Upload Error:", uploadError);
             return res.status(500).json({ 
                 success: false, 
-                message: "Failed to upload verification images. Please try again." 
+                message: "Failed to upload digital signature. Please try again." 
             });
         }
 
@@ -604,7 +596,7 @@ app.post("/api/auth/register", async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
 
-        // Get Client IP (Handles proxies like Heroku/Nginx)
+        // Get Client IP
         const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
         // Create User Instance
@@ -618,7 +610,7 @@ app.post("/api/auth/register", async (req, res) => {
 
             // --- LEGAL & SECURITY FIELDS ---
             digitalSignature: signatureUrl,
-            verificationSelfie: selfieUrl,
+            // verificationSelfie is REMOVED
             termsAcceptedAt: new Date(),
             termsAcceptedIP: clientIp
         });
@@ -634,23 +626,23 @@ app.post("/api/auth/register", async (req, res) => {
             `<p>Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
              <p>Thank you for registering. Your account has been created.</p>
              <p><strong>Your Profile ID:</strong> ${user.uniqueId}</p>
-             <p>We have successfully recorded your digital signature and identity verification.</p>
+             <p>We have successfully recorded your digital signature as acceptance of our Terms & Conditions.</p>
              <div style="text-align: center; margin: 20px 0;">
                 <p style="color: #555;">(Note: For security, you will receive an OTP every time you log in.)</p>
              </div>`
         );
 
-        // Email 2: Admin Alert (Now includes info about verification)
+        // Email 2: Admin Alert
         const adminAlertContent = generateEmailTemplate(
             "New User Registration",
-            `<p>A new user has registered and submitted verification details.</p>
+            `<p>A new user has registered.</p>
              <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
                 <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Name:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.firstName} ${user.lastName}</td></tr>
                 <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>ID:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.uniqueId}</td></tr>
                 <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Mobile:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.mobileNumber}</td></tr>
-                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Verified:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd; color: green;"><strong>Yes (Sig + Selfie)</strong></td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Legal:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd; color: green;"><strong>Terms Accepted (Signed)</strong></td></tr>
              </table>
-             <p style="margin-top: 15px;">Please login to Admin Dashboard to review the profile and verification images.</p>`
+             <p style="margin-top: 15px;">Please login to Admin Dashboard to review the profile.</p>`
         );
 
         // Send Emails in Parallel
@@ -667,7 +659,7 @@ app.post("/api/auth/register", async (req, res) => {
         // --- STEP 6: RESPONSE ---
         res.json({ 
             success: true, 
-            message: "Registration successful! Verification data saved.",
+            message: "Registration successful!",
             email: user.email
         });
 
@@ -676,6 +668,8 @@ app.post("/api/auth/register", async (req, res) => {
         res.status(500).json({ success: false, message: e.message }); 
     }
 });
+                 
+        
 
                                        
 
