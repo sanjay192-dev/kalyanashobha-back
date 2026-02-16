@@ -2786,6 +2786,109 @@ app.post("/api/admin/create-simple", async (req, res) => {
         res.status(500).json({ success: false, message: e.message });
     }
 });
+// --- HELPER: GENERATE CERTIFICATE HTML ---
+const generateCertificateHTML = (user) => {
+    // Format Date
+    const signedDate = user.termsAcceptedAt 
+        ? new Date(user.termsAcceptedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+        : "Not Recorded";
+
+    return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Acceptance Certificate - ${user.uniqueId}</title>
+        <style>
+            body { font-family: 'Times New Roman', serif; background-color: #f9f9f9; padding: 40px; }
+            .certificate-container {
+                max-width: 800px; margin: 0 auto; background: white; padding: 50px;
+                border: 10px solid #2c3e50; position: relative;
+            }
+            .header { text-align: center; margin-bottom: 40px; }
+            .header h1 { font-size: 36px; color: #c0392b; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+            .header h3 { font-size: 18px; color: #555; margin-top: 10px; font-weight: normal; }
+            .content { font-size: 16px; line-height: 1.8; color: #333; margin-bottom: 50px; text-align: justify; }
+            .details-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+            .details-table td { padding: 8px; border-bottom: 1px solid #eee; }
+            .signature-section { display: flex; justify-content: space-between; margin-top: 60px; }
+            .sig-box { text-align: center; width: 45%; }
+            .sig-img { max-height: 80px; display: block; margin: 0 auto 10px; }
+            .line { border-top: 2px solid #333; margin-top: 10px; }
+            .footer { text-align: center; font-size: 10px; color: #999; margin-top: 40px; border-top: 1px solid #ddd; padding-top: 10px; }
+        </style>
+    </head>
+    <body>
+        <div class="certificate-container">
+            <div class="header">
+                <h1>Certificate of Acceptance</h1>
+                <h3>KalyanaShobha Matrimony Services</h3>
+            </div>
+
+            <div class="content">
+                <p>This document certifies that the user identified below has successfully registered with KalyanaShobha and has explicitly agreed to the <strong>Terms & Conditions</strong> and <strong>Privacy Policy</strong> of the platform.</p>
+                
+                <p>By providing their digital signature, the user has confirmed the accuracy of their profile information and consented to identity verification protocols.</p>
+
+                <table class="details-table">
+                    <tr><td><strong>User Name:</strong></td><td>${user.firstName} ${user.lastName}</td></tr>
+                    <tr><td><strong>Profile ID:</strong></td><td>${user.uniqueId}</td></tr>
+                    <tr><td><strong>Email Address:</strong></td><td>${user.email}</td></tr>
+                    <tr><td><strong>Mobile Number:</strong></td><td>${user.mobileNumber}</td></tr>
+                    <tr><td><strong>Acceptance Date:</strong></td><td>${signedDate}</td></tr>
+                    <tr><td><strong>IP Address:</strong></td><td>${user.termsAcceptedIP || "N/A"}</td></tr>
+                </table>
+            </div>
+
+            <div class="signature-section">
+                <div class="sig-box">
+                    <img src="${user.digitalSignature}" alt="User Signature" class="sig-img" />
+                    <div class="line"></div>
+                    <p><strong>${user.firstName} ${user.lastName}</strong><br>Electronically Signed</p>
+                </div>
+                <div class="sig-box">
+                    <h2 style="margin:0; color: #2c3e50; font-family: 'Brush Script MT', cursive; font-size: 30px;">KalyanaShobha</h2>
+                    <div class="line"></div>
+                    <p><strong>Authorized System</strong><br>Verification Authority</p>
+                </div>
+            </div>
+
+            <div class="footer">
+                <p>Certificate Generated on: ${new Date().toLocaleString()}</p>
+                <p>Document ID: ${user._id} | This is a computer-generated document.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+};
+
+// ====================================================================
+// GET USER CERTIFICATE (HTML View)
+// ====================================================================
+app.get("/api/admin/user-certificate/:id", verifyAdmin, async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        
+        if (!user) {
+            return res.status(404).send("User not found");
+        }
+
+        if (!user.digitalSignature) {
+            return res.status(400).send("User has not signed digitally.");
+        }
+
+        // Generate the HTML
+        const html = generateCertificateHTML(user);
+
+        // Send as HTML page (Browser will render it, Admin can Print/Save as PDF)
+        res.send(html);
+
+    } catch (e) {
+        console.error("Certificate Error:", e);
+        res.status(500).send("Server Error generating certificate");
+    }
+});
+
 
 
 
