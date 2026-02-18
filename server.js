@@ -2994,45 +2994,52 @@ app.post("/api/admin/add-sub-community", verifyAdmin, async (req, res) => {
 
 
 
-// --- GET API 1: Get All Communities & Sub-Communities (Best for App Initialization) ---
+// ====================================================================
+// PUBLIC: GET COMMUNITY DROPDOWN DATA
+// ====================================================================
+
+// 1. Get ALL Communities (Names + Sub-communities)
+// Usage: Call this when the Registration Page loads to fill the first dropdown.
 app.get("/api/public/get-all-communities", async (req, res) => {
     try {
-        // .find() fetches all documents
-        // .lean() converts Mongoose objects to plain JSON (faster performance)
-        const communities = await Community.find().lean();
+        // .lean() converts Mongoose objects to plain JSON for faster performance
+        const communities = await Community.find().select('name subCommunities').lean();
 
-        res.status(200).json({
+        res.json({
             success: true,
             count: communities.length,
             data: communities
         });
-
-    } catch (error) {
-        console.error("Error fetching communities:", error);
+    } catch (e) {
+        console.error("Get Communities Error:", e);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
 
-// --- GET API 2: Get Sub-Communities by Name (Best for Lazy Loading) ---
-// Usage: /api/public/get-sub-community/Hindu
+// 2. Get Sub-Communities for a Specific Community
+// Usage: Call this if you prefer to load data ONLY after the user selects a Religion.
+// Example URL: /api/public/get-sub-community/Hindu
 app.get("/api/public/get-sub-community/:name", async (req, res) => {
     try {
         const communityName = req.params.name;
         
-        // Find the specific community document
-        const community = await Community.findOne({ name: communityName });
+        // Find the community by name (Case-insensitive search is better for public APIs)
+        const community = await Community.findOne({ 
+            name: { $regex: new RegExp(`^${communityName}$`, 'i') } 
+        });
 
         if (!community) {
             return res.status(404).json({ success: false, message: "Community not found" });
         }
 
-        res.status(200).json({
+        res.json({
             success: true,
             community: community.name,
-            subCommunities: community.subCommunities
+            subCommunities: community.subCommunities.sort() // Return alphabetically sorted
         });
 
-    } catch (error) {
+    } catch (e) {
+        console.error("Get SubCommunity Error:", e);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
