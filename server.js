@@ -2935,6 +2935,49 @@ app.post("/api/admin/add-sub-community", async (req, res) => {
     }
 });
 
+// --- GET API 1: Get All Communities & Sub-Communities (Best for App Initialization) ---
+app.get("/api/public/get-all-communities", async (req, res) => {
+    try {
+        // .find() fetches all documents
+        // .lean() converts Mongoose objects to plain JSON (faster performance)
+        const communities = await Community.find().lean();
+
+        res.status(200).json({
+            success: true,
+            count: communities.length,
+            data: communities
+        });
+
+    } catch (error) {
+        console.error("Error fetching communities:", error);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// --- GET API 2: Get Sub-Communities by Name (Best for Lazy Loading) ---
+// Usage: /api/public/get-sub-community/Hindu
+app.get("/api/public/get-sub-community/:name", async (req, res) => {
+    try {
+        const communityName = req.params.name;
+        
+        // Find the specific community document
+        const community = await Community.findOne({ name: communityName });
+
+        if (!community) {
+            return res.status(404).json({ success: false, message: "Community not found" });
+        }
+
+        res.status(200).json({
+            success: true,
+            community: community.name,
+            subCommunities: community.subCommunities
+        });
+
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
 
 
 
