@@ -2888,6 +2888,52 @@ app.get("/api/admin/user-certificate/:id", verifyAdmin, async (req, res) => {
         res.status(500).send("Server Error generating certificate");
     }
 });
+// 1. Add Main Community (or Multiple)
+app.post("/api/admin/create-community", async (req, res) => {
+    try {
+        // Expects input like: { "communities": ["Hindu", "Christian", "Sikh"] }
+        const { communities } = req.body; 
+
+        if (!communities || !Array.isArray(communities)) {
+            return res.status(400).json({ success: false, message: "Provide an array of community names" });
+        }
+
+        const operations = communities.map(name => ({
+            updateOne: {
+                filter: { name: name },
+                update: { $setOnInsert: { name: name, subCommunities: [] } },
+                upsert: true // Create if doesn't exist, ignore if it does
+            }
+        }));
+
+        await Community.bulkWrite(operations);
+
+        res.json({ success: true, message: "Communities processed successfully" });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+// 2. Add Sub-Communities to an Existing Parent
+app.post("/api/admin/add-sub-community", async (req, res) => {
+    try {
+        const { communityName, subCommunities } = req.body; 
+        // Input: { "communityName": "Hindu", "subCommunities": ["Brahmin", "Yadav"] }
+
+        const updated = await Community.findOneAndUpdate(
+            { name: communityName },
+            { $addToSet: { subCommunities: { $each: subCommunities } } },
+            { new: true }
+        );
+
+        if (!updated) {
+            return res.status(404).json({ success: false, message: "Main Community not found. Create it first." });
+        }
+
+        res.json({ success: true, data: updated });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
 
 
 
