@@ -18,6 +18,7 @@ const Interest = require('./models/Interest');
 const PaymentRegistration = require('./models/PaymentRegistration');
 const PaymentInterest = require('./models/PaymentInterest');
 const Admin = require('./models/Admin');
+const Community = require('./models/CommunityModel');
 
 const app = express();
 // Allow all headers and origins to fix the browser blocking issue
@@ -2888,10 +2889,12 @@ app.get("/api/admin/user-certificate/:id", verifyAdmin, async (req, res) => {
         res.status(500).send("Server Error generating certificate");
     }
 });
-// 1. Add Main Community (or Multiple)
-app.post("/api/admin/create-community", async (req, res) => {
+
+
+// 1. Add Main Community (SECURED)
+// ADD verifyAdmin here 👇
+app.post("/api/admin/create-community", verifyAdmin, async (req, res) => {
     try {
-        // Expects input like: { "communities": ["Hindu", "Christian", "Sikh"] }
         const { communities } = req.body; 
 
         if (!communities || !Array.isArray(communities)) {
@@ -2902,7 +2905,7 @@ app.post("/api/admin/create-community", async (req, res) => {
             updateOne: {
                 filter: { name: name },
                 update: { $setOnInsert: { name: name, subCommunities: [] } },
-                upsert: true // Create if doesn't exist, ignore if it does
+                upsert: true 
             }
         }));
 
@@ -2910,15 +2913,18 @@ app.post("/api/admin/create-community", async (req, res) => {
 
         res.json({ success: true, message: "Communities processed successfully" });
     } catch (e) {
+        console.error("Create Community Error:", e); // Added console log for debugging
         res.status(500).json({ success: false, message: e.message });
     }
 });
-// 2. Add Sub-Communities to an Existing Parent
-app.post("/api/admin/add-sub-community", async (req, res) => {
+
+// 2. Add Sub-Communities (SECURED)
+// ADD verifyAdmin here 👇
+app.post("/api/admin/add-sub-community", verifyAdmin, async (req, res) => {
     try {
         const { communityName, subCommunities } = req.body; 
-        // Input: { "communityName": "Hindu", "subCommunities": ["Brahmin", "Yadav"] }
 
+        // Use findOneAndUpdate to append new data
         const updated = await Community.findOneAndUpdate(
             { name: communityName },
             { $addToSet: { subCommunities: { $each: subCommunities } } },
@@ -2931,9 +2937,11 @@ app.post("/api/admin/add-sub-community", async (req, res) => {
 
         res.json({ success: true, data: updated });
     } catch (e) {
+        console.error("Add SubCommunity Error:", e);
         res.status(500).json({ success: false, message: e.message });
     }
 });
+
 
 // --- GET API 1: Get All Communities & Sub-Communities (Best for App Initialization) ---
 app.get("/api/public/get-all-communities", async (req, res) => {
