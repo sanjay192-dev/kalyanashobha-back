@@ -2891,43 +2891,93 @@ app.get("/api/admin/user-certificate/:id", verifyAdmin, async (req, res) => {
 });
 
 
-// 1. Add Main Community (SECURED)
-// ADD verifyAdmin here 👇
-app.post("/api/admin/create-community", verifyAdmin, async (req, res) => {
+// ====================================================================
+// UNIVERSAL ADD COMMUNITY API (Handles Single, Multiple & Sub-Communities)
+// ====================================================================
+app.post("/api/admin/add-community", verifyAdmin, async (req, res) => {
     try {
-        const { communities } = req.body; 
+        let { community, subCommunity } = req.body;
 
-        if (!communities || !Array.isArray(communities)) {
-            return res.status(400).json({ success: false, message: "Provide an array of community names" });
+        if (!community) {
+            return res.status(400).json({ success: false, message: "Community name is required" });
         }
 
-        const operations = communities.map(name => ({
-            updateOne: {
-                filter: { name: name },
-                update: { $setOnInsert: { name: name, subCommunities: [] } },
-                upsert: true 
+        // --- SCENARIO 1: Multiple Communities (Array) ---
+        // Input: { "community": ["Hindu", "Muslim", "Sikh"] }
+        // Logic: Creates them all at once. Ignores 'subCommunity' to avoid confusion.
+        if (Array.isArray(community)) {
+            const operations = community.map(name => ({
+                updateOne: {
+                    filter: { name: name.trim() },
+                    update: { $setOnInsert: { name: name.trim(), subCommunities: [] } },
+                    upsert: true // Create if it doesn't exist, Do nothing if it does
+                }
+            }));
+            
+            await Community.bulkWrite(operations);
+            return res.json({ success: true, message: `Successfully processed ${community.length} communities.` });
+        }
+
+        // --- SCENARIO 2: Single Community (String) ---
+        // Input: { "community": "Hindu", "subCommunity": "Brahmin" } OR { "community": "Hindu", "subCommunity": ["Brahmin", "Yadav"] }
+        if (typeof community === 'string') {
+            const communityName = community.trim();
+            let subCommunitiesToAdd = [];
+
+            // Normalize subCommunity to an Array (handles string, array, or null)
+            if (subCommunity) {
+                subCommunitiesToAdd = Array.isArray(subCommunity) 
+                    ? subCommunity.map(s => s.trim()) 
+                    : [subCommunity.trim()];
             }
-        }));
 
-        await Community.bulkWrite(operations);
+            // The Magic Query: "Upsert"
+            // 1. Finds the community by name.
+            // 2. If found -> Adds new sub-communities (without duplicates).
+            // 3. If NOT found -> Creates it AND adds the sub-communities.
+            const updatedCommunity = await Community.findOneAndUpdate(
+                { name: communityName },
+                { 
+                    $setOnInsert: { name: communityName }, // Runs only if creating new
+                    $addToSet: { subCommunities: { $each: subCommunitiesToAdd } } // Runs always (adds unique subs)
+                },
+                { new: true, upsert: true }
+            );
 
-        res.json({ success: true, message: "Communities processed successfully" });
+            return res.json({ 
+                success: true, 
+                message: "Community saved successfully", 
+                data: updatedCommunity 
+            });
+        }
+
+        return res.status(400).json({ success: false, message: "Invalid format" });
+
     } catch (e) {
-        console.error("Create Community Error:", e); // Added console log for debugging
+        console.error("Add Community Error:", e);
         res.status(500).json({ success: false, message: e.message });
     }
 });
 
-// 2. Add Sub-Communities (SECURED)
-// ADD verifyAdmin here 👇
+// 2. Add Sub-Communities (SECURED & SAFER)
 app.post("/api/admin/add-sub-community", verifyAdmin, async (req, res) => {
     try {
-        const { communityName, subCommunities } = req.body; 
+        let { communityName, subCommunities } = req.body; 
+
+        if (!communityName || !subCommunities) {
+             return res.status(400).json({ success: false, message: "Community Name and Sub-Communities are required." });
+        }
+
+        // --- SAFETY FIX: Ensure it is always an array ---
+        // If user sends "Brahmin", we convert it to ["Brahmin"]
+        const subCommunitiesArray = Array.isArray(subCommunities) 
+            ? subCommunities 
+            : [subCommunities];
 
         // Use findOneAndUpdate to append new data
         const updated = await Community.findOneAndUpdate(
             { name: communityName },
-            { $addToSet: { subCommunities: { $each: subCommunities } } },
+            { $addToSet: { subCommunities: { $each: subCommunitiesArray } } },
             { new: true }
         );
 
@@ -2935,12 +2985,13 @@ app.post("/api/admin/add-sub-community", verifyAdmin, async (req, res) => {
             return res.status(404).json({ success: false, message: "Main Community not found. Create it first." });
         }
 
-        res.json({ success: true, data: updated });
+        res.json({ success: true, message: "Sub-communities added", data: updated });
     } catch (e) {
         console.error("Add SubCommunity Error:", e);
         res.status(500).json({ success: false, message: e.message });
     }
 });
+
 
 
 // --- GET API 1: Get All Communities & Sub-Communities (Best for App Initialization) ---
