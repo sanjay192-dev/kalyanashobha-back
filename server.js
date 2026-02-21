@@ -596,7 +596,7 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
         const uniqueId = await generateUserId(data.state);
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
-        
+
         const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
         // Create User Instance
@@ -667,8 +667,8 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
         );
 
         // --- STEP 5: SEND EMAILS (Parallel & Awaited for Vercel) ---
-        
-        // 1. Prepare Promises
+
+        // 1. Prepare Base Promises
         const sendUserMail = sendMail({ 
             to: user.email, 
             subject: "Welcome to KalyanaShobha Matrimony", 
@@ -681,9 +681,42 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
             html: adminAlertContent 
         });
 
-        // 2. Wait for completion
+        const emailPromises = [sendUserMail, sendAdminMail];
+
+        // 2. NEW LOGIC: Check for Agent Referral & Add to Promises
+        if (data.referredByAgentId) {
+            try {
+                // Fetch the agent details from DB
+                const agent = await Agent.findById(data.referredByAgentId);
+                if (agent) {
+                    const agentAlertContent = generateEmailTemplate(
+                        "New Referral Registration",
+                        `<p>Dear ${agent.name},</p>
+                         <p>Great news! A new user has just registered using your referral link.</p>
+                         <p><strong>User Name:</strong> ${user.firstName} ${user.lastName}</p>
+                         <p><strong>Profile ID:</strong> ${user.uniqueId}</p>
+                         <p>This user is now tracked under your agent dashboard.</p>
+                         <div style="margin-top: 20px; text-align: center;">
+                            <a href="https://kalyanashobha-agent.vercel.app" style="background-color: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-size: 14px;">Go to Agent Dashboard</a>
+                         </div>`
+                    );
+                    
+                    const sendAgentMail = sendMail({ 
+                        to: agent.email, 
+                        subject: `New Referral Joined: ${user.firstName}`, 
+                        html: agentAlertContent 
+                    });
+                    
+                    emailPromises.push(sendAgentMail);
+                }
+            } catch (agentErr) {
+                console.error("Failed to fetch agent for referral email:", agentErr);
+            }
+        }
+
+        // 3. Wait for all emails to complete
         try {
-            await Promise.all([sendUserMail, sendAdminMail]);
+            await Promise.all(emailPromises);
             console.log("Registration emails sent successfully.");
         } catch (emailError) {
             console.error("Email Sending Failed:", emailError);
@@ -703,9 +736,7 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
         res.status(500).json({ success: false, message: e.message }); 
     }
 });
-
-            
-                                       
+                        
 
 
 // ======================== FORGOT PASSWORD (SEND OTP) =========================
