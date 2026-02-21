@@ -2420,7 +2420,6 @@ app.get("/api/agent/users", verifyAgent, async (req, res) => {
     }
 });
 
-
 // 3. Register a User (Manual Entry by Agent) - *** FIXED ENUM & FIELDS ***
 app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
     try {
@@ -2435,7 +2434,7 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
         const existingUser = await User.findOne({ 
             $or: [{ email: data.email }, { mobileNumber: data.mobileNumber }] 
         });
-        
+
         if (existingUser) {
             return res.status(400).json({ success: false, message: "User with this Email or Mobile already exists" });
         }
@@ -2453,7 +2452,7 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
             firstName: data.firstName,
             lastName: data.lastName,
             dob: data.dob,
-            
+
             // --- Religion & Community ---
             religion: data.religion,
             community: data.community, // React frontend sends 'caste' as 'community'
@@ -2482,7 +2481,7 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
             email: data.email,
             mobileNumber: data.mobileNumber,
             password: hashedPassword,
-            
+
             // --- System Fields ---
             uniqueId: uniqueId,
             isActive: true, // Agent created profiles are active by default (but might need approval)
@@ -2498,7 +2497,8 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
         // 4. Save to DB
         await user.save();
 
-        // 5. Send Welcome Email
+        // 5. PREPARE EMAILS
+        // A. Welcome Email to User
         const userWelcomeContent = generateEmailTemplate(
             "Welcome to KalyanaShobha",
             `<p>Dear ${user.firstName},</p>
@@ -2507,7 +2507,38 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
              <p><strong>Login Password:</strong> ${data.password}</p>
              <p>Please login to your dashboard to view matches.</p>`
         );
-        sendMail({ to: user.email, subject: "Profile Created via Agent", html: userWelcomeContent });
+        const sendUserMail = sendMail({ 
+            to: user.email, 
+            subject: "Profile Created via Agent", 
+            html: userWelcomeContent 
+        });
+
+        // B. Confirmation Email to Agent (NEW)
+        const agentNotificationContent = generateEmailTemplate(
+            "New User Registered Successfully",
+            `<p>Dear ${agent.name},</p>
+             <p>You have successfully registered a new user manually on KalyanaShobha.</p>
+             <p><strong>User Name:</strong> ${user.firstName} ${user.lastName}</p>
+             <p><strong>Profile ID:</strong> ${user.uniqueId}</p>
+             <p>This user has been added to your referral list and you can track their status in your agent dashboard.</p>
+             <div style="margin-top: 20px; text-align: center;">
+                <a href="https://kalyanashobha-agent.vercel.app" style="background-color: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-size: 14px;">Go to Dashboard</a>
+             </div>`
+        );
+        const sendAgentMail = sendMail({ 
+            to: agent.email, 
+            subject: `Registration Successful: ${user.firstName}`, 
+            html: agentNotificationContent 
+        });
+
+        // 6. SEND EMAILS (Parallel & Awaited)
+        try {
+            await Promise.all([sendUserMail, sendAgentMail]);
+            console.log("Agent manual registration emails sent successfully.");
+        } catch (emailError) {
+            console.error("Email Sending Failed:", emailError);
+            // We don't throw here so the agent still gets the success response even if email fails
+        }
 
         res.json({ success: true, message: "User registered successfully under your referral." });
 
@@ -2517,6 +2548,8 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
         res.status(500).json({ success: false, message: e.message });
     }
 });
+
+
 
 // 4. View Membership Payments (Only for My Users)
 app.get("/api/agent/payments/registrations", verifyAgent, async (req, res) => {
