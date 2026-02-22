@@ -1,6 +1,8 @@
+// models/Vendor.js
 const mongoose = require('mongoose');
 
 const VendorSchema = new mongoose.Schema({
+  vendorId: { type: String, unique: true }, // <--- ADD THIS LINE
   businessName: { type: String, required: true },
   category: { 
     type: String, 
