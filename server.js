@@ -3110,6 +3110,80 @@ app.get("/api/public/get-sub-community/:name", async (req, res) => {
     }
 });
 
+// Submit a new lead for a vendor
+app.post("/api/user/vendor-lead", async (req, res) => {
+    try {
+        const { vendorId, name, phone, email, weddingDate, guestCount, message } = req.body;
+
+        // 1. Basic Validation
+        if (!vendorId || !name || !phone || !message) {
+            return res.status(400).json({ success: false, message: "Name, phone, and message are required." });
+        }
+
+        // 2. Save Lead to Database
+        const newLead = new VendorLead({ 
+            vendorId, name, phone, email, weddingDate, guestCount, message 
+        });
+        await newLead.save();
+
+        // 3. Fetch Vendor Details (To know who the lead is for)
+        const vendor = await Vendor.findById(vendorId);
+        const vendorName = vendor ? vendor.businessName : "Unknown Vendor";
+
+        // 4. Send Instant Email Alert to Admin
+        const adminAlertContent = generateEmailTemplate(
+            "New Premium Vendor Lead",
+            `<p>A new lead has been submitted for <strong>${vendorName}</strong>.</p>
+             <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px;">
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; width: 30%; color: #666;"><strong>Name:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${name}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Phone:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${phone}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Date:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${weddingDate || 'N/A'}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Guests:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${guestCount || 'N/A'}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Message:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${message}</td></tr>
+             </table>
+             <div style="margin-top: 20px; text-align: center;">
+                <a href="https://kalyanashobha-admin.vercel.app" style="background-color: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-size: 14px;">Open Admin Dashboard</a>
+             </div>`
+        );
+
+        // Send to the admin email defined in your environment
+        await sendMail({ 
+            to: process.env.EMAIL_USER || "adepusanjay444@gmail.com", 
+            subject: `New Lead: ${vendorName}`, 
+            html: adminAlertContent 
+        });
+
+        // 5. Send Success Response to Frontend
+        res.json({ 
+            success: true, 
+            message: "Request sent successfully! Our concierge team will contact you shortly." 
+        });
+
+    } catch (error) {
+        console.error("Vendor Lead Submit Error:", error);
+        res.status(500).json({ success: false, message: "Server Error while submitting lead" });
+    }
+});
+
+// Admin: Get all vendor leads
+app.get("/api/admin/vendor-leads", verifyAdmin, async (req, res) => {
+    try {
+        // Fetch leads and populate the vendor details so admin knows which business this is for
+        const leads = await VendorLead.find()
+            .populate('vendorId', 'businessName category contactPerson mobile')
+            .sort({ createdAt: -1 }); // Newest leads first
+
+        res.json({ 
+            success: true, 
+            count: leads.length, 
+            data: leads 
+        });
+
+    } catch (error) {
+        console.error("Fetch Admin Leads Error:", error);
+        res.status(500).json({ success: false, message: "Server Error fetching vendor leads" });
+    }
+});
 
 
 
