@@ -3198,7 +3198,8 @@ app.get("/api/admin/vendor-leads", verifyAdmin, async (req, res) => {
     try {
         // Fetch leads and populate the vendor details so admin knows which business this is for
         const leads = await VendorLead.find()
-            .populate('vendorId', 'businessName category contactPerson mobile')
+            // ADD 'vendorId' to this list below:
+            .populate('vendorId', 'vendorId businessName category contactNumber') 
             .sort({ createdAt: -1 }); // Newest leads first
 
         res.json({ 
@@ -3212,6 +3213,7 @@ app.get("/api/admin/vendor-leads", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error fetching vendor leads" });
     }
 });
+
 
 
 
