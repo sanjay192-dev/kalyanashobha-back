@@ -20,6 +20,8 @@ const PaymentInterest = require('./models/PaymentInterest');
 const Admin = require('./models/Admin');
 const Community = require('./models/CommunityModel');
 
+const VendorLead = require('./models/VendorLead');
+
 const app = express();
 // Allow all headers and origins to fix the browser blocking issue
 app.use(cors({
