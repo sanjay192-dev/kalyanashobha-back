@@ -294,6 +294,29 @@ const verifyAgent = (req, res, next) => {
     }
 };
 
+// ---------------- VENDOR ID GENERATOR ----------------
+async function generateVendorId() {
+    const prefix = "VND";
+
+    // Find last vendor with this prefix
+    const lastVendor = await Vendor.findOne({
+        vendorId: { $regex: `^${prefix}-` }
+    }).sort({ vendorId: -1 });
+
+    let nextNumber = 1;
+
+    if (lastVendor && lastVendor.vendorId) {
+        const lastNum = parseInt(lastVendor.vendorId.split("-")[1]);
+        if (!isNaN(lastNum)) {
+            nextNumber = lastNum + 1;
+        }
+    }
+
+    // Pad with 4 zeros (e.g., VND-0001)
+    return `${prefix}-${String(nextNumber).padStart(4, "0")}`;
+}
+
+
 
 app.get("/api/agent/users/interests", verifyAgent, async (req, res) => {
     try {
@@ -1459,7 +1482,11 @@ app.post("/api/admin/vendors", verifyAdmin, uploadVendor.array("images", 5), asy
       return res.status(400).json({ success: false, message: "Business Name, Category, and Contact Number are required." });
     }
 
+    // --- NEW: Generate Unique Vendor ID ---
+    const vendorId = await generateVendorId();
+
     const vendor = new Vendor({
+      vendorId, // <--- Save the generated ID here
       businessName,
       category,
       description,
@@ -1476,6 +1503,7 @@ app.post("/api/admin/vendors", verifyAdmin, uploadVendor.array("images", 5), asy
     res.status(500).json({ success: false, message: error.message || "Failed to create vendor" }); 
   }
 });
+
 
 // 2. GET: Fetch all Vendors for Admin Dashboard
 app.get("/api/admin/vendors", verifyAdmin, async (req, res) => {
