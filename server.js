@@ -106,6 +106,14 @@ const signatureStorage = new CloudinaryStorage({
     }
 });
 const uploadSignature = multer({ storage: signatureStorage });
+const issueStorage = new CloudinaryStorage({
+    cloudinary,
+    params: { 
+        folder: "matrimony_issues", 
+        allowed_formats: ["jpg", "jpeg", "png"] 
+    }
+});
+const uploadIssue = multer({ storage: issueStorage });
 
 
 // ---------------- EMAIL SYSTEM (PROFESSIONAL) ----------------
@@ -3214,7 +3222,110 @@ app.get("/api/admin/vendor-leads", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error fetching vendor leads" });
     }
 });
+app.post("/api/user/help-center/submit", verifyUser, uploadIssue.single("screenshot"), async (req, res) => {
+    try {
+        const { subject, summary } = req.body;
+        const user = await User.findById(req.userId);
 
+        if (!subject || !summary) {
+            return res.status(400).json({ success: false, message: "Subject and summary are required." });
+        }
+
+        // Get Cloudinary URL if a screenshot was uploaded
+        const screenshotUrl = req.file ? req.file.path : null;
+
+        const issue = new HelpIssue({
+            userId: req.userId,
+            subject,
+            summary,
+            screenshotUrl
+        });
+        
+        await issue.save();
+
+        // Send Email Alert to Admin
+        const adminEmailContent = generateEmailTemplate(
+            "New Help Center Ticket",
+            `<p>User <strong>${user.firstName} ${user.lastName}</strong> (${user.uniqueId}) has reported a new issue.</p>
+             <p><strong>Subject:</strong> ${subject}</p>
+             <p><strong>Summary:</strong> ${summary}</p>
+             ${screenshotUrl ? `<p><a href="${screenshotUrl}" target="_blank" style="color: #2c3e50; font-weight: bold;">View Attached Screenshot</a></p>` : "<p><em>No screenshot provided.</em></p>"}
+             <div style="margin-top: 20px; text-align: center;">
+                <a href="https://kalyanashobha-admin.vercel.app" style="background-color: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">Open Admin Dashboard</a>
+             </div>`
+        );
+
+        // Send to your admin email
+        await sendMail({ 
+            to: process.env.EMAIL_USER || "adepusanjay444@gmail.com", 
+            subject: `New Issue Reported: ${subject}`, 
+            html: adminEmailContent 
+        });
+
+        res.json({ success: true, message: "Issue submitted successfully. Our team will look into it." });
+
+    } catch (error) {
+        console.error("Help Center Submit Error:", error);
+        res.status(500).json({ success: false, message: "Server Error while submitting issue" });
+    }
+});
+
+// A. Fetch Issues for Admin Dashboard
+app.get("/api/admin/help-center/issues", verifyAdmin, async (req, res) => {
+    try {
+        const issues = await HelpIssue.find()
+            .populate('userId', 'firstName lastName uniqueId email mobileNumber')
+            .sort({ date: -1 }); // Newest first
+
+        res.json({ success: true, count: issues.length, data: issues });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Server Error fetching issues" });
+    }
+});
+
+// B. Admin Resolves the Issue
+app.post("/api/admin/help-center/resolve", verifyAdmin, async (req, res) => {
+    try {
+        const { issueId, adminReply } = req.body;
+
+        if (!issueId || !adminReply) {
+            return res.status(400).json({ success: false, message: "Issue ID and Admin Reply are required." });
+        }
+
+        const issue = await HelpIssue.findById(issueId).populate('userId');
+        if (!issue) {
+            return res.status(404).json({ success: false, message: "Issue not found." });
+        }
+
+        // Update status in DB
+        issue.status = 'Resolved';
+        await issue.save();
+
+        // Send Resolution Email to User
+        const userEmailContent = generateEmailTemplate(
+            "Support Ticket Resolved",
+            `<p>Dear ${issue.userId.firstName},</p>
+             <p>Your recent support ticket regarding "<strong>${issue.subject}</strong>" has been reviewed and resolved by our team.</p>
+             <div style="background-color: #f9f9f9; padding: 15px; border-left: 4px solid #2c3e50; margin: 20px 0;">
+                <p style="margin: 0; color: #333;"><strong>Admin Reply:</strong><br>${adminReply}</p>
+             </div>
+             <p>If you require further assistance, please feel free to submit a new ticket from your dashboard.</p>`
+        );
+
+        await sendMail({ 
+            to: issue.userId.email, 
+            subject: `Resolved: ${issue.subject}`, 
+            html: userEmailContent 
+        });
+
+        res.json({ success: true, message: "Issue resolved and user notified successfully." });
+
+    } catch (error) {
+        console.error("Resolve Issue Error:", error);
+        res.status(500).json({ success: false, message: "Server Error resolving issue" });
+    }
+});
+    
 
 
 
