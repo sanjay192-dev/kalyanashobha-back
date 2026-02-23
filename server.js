@@ -20,6 +20,7 @@ const PaymentInterest = require('./models/PaymentInterest');
 const Admin = require('./models/Admin');
 const Community = require('./models/CommunityModel');
 
+const HelpIssue = require('./models/HelpIssue');
 const VendorLead = require('./models/VendorLead');
 
 const app = express();
