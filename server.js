@@ -78,11 +78,22 @@ cloudinary.config({
 });
 
 // Storage Configs
+// ---------------- CLOUDINARY CONFIG ----------------
+
+// Update the profileStorage configuration
 const profileStorage = new CloudinaryStorage({
     cloudinary,
-    params: { folder: "matrimony_users", allowed_formats: ["jpg", "jpeg", "png"], transformation: [{ width: 800, height: 800, crop: "limit" }] }
+    params: { 
+        folder: "matrimony_users", 
+        allowed_formats: ["jpg", "jpeg", "png", "webp"], // Added webp
+        transformation: [
+            { width: 800, height: 800, crop: "limit" },
+            { quality: "auto:eco", fetch_format: "auto" } // 'eco' forces aggressive KB compression
+        ] 
+    }
 });
 const uploadProfile = multer({ storage: profileStorage });
+
 
 const paymentStorage = new CloudinaryStorage({
     cloudinary,
