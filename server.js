@@ -2736,20 +2736,21 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
             statusMap[otherId] = inter.status; 
         });
 
-        // 4. Destructure Filters from Body
+        // 4. Destructure Filters from Body (ADDED 'community' here)
         const {
             searchId,
             minAge, maxAge,
             minHeight, maxHeight,
             minSalary,
             education,
+            community, 
             subCommunity,
             maritalStatus,
             occupation
         } = req.body;
 
-        // 5. CHECK PERMISSIONS
-        const hasFilters = searchId || minAge || maxAge || minHeight || maxHeight || minSalary || education || subCommunity || maritalStatus || occupation;
+        // 5. CHECK PERMISSIONS (ADDED 'community' to the check)
+        const hasFilters = searchId || minAge || maxAge || minHeight || maxHeight || minSalary || education || community || subCommunity || maritalStatus || occupation;
 
         if (hasFilters && !isViewerPremium) {
             return res.status(403).json({ 
@@ -2788,6 +2789,12 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
                 }
                 if (education) query.highestQualification = education;
                 if (maritalStatus) query.maritalStatus = maritalStatus;
+                
+                // --- ADDED COMMUNITY FILTER HERE ---
+                if (community) {
+                    query.community = community; 
+                }
+
                 if (subCommunity) {
                     query.$or = [{ caste: subCommunity }, { subCommunity: subCommunity }];
                 }
@@ -2797,7 +2804,7 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
             }
         }
 
-                // 8. Execute Query
+        // 8. Execute Query
         let profilesQuery = User.find(query)
             // Added 'community' and 'caste' to the select list here
             .select('firstName lastName dob highestQualification community caste subCommunity city state maritalStatus jobRole uniqueId photos height annualIncome')
@@ -2829,11 +2836,11 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
                 age: age,
                 occupation: p.jobRole || "Not Specified",
                 education: p.highestQualification || "Not Specified",
-                
+
                 // NEW: Send both community and subCommunity separately
                 community: p.community || p.caste || "Not Specified",
                 subCommunity: p.subCommunity || "Not Specified",
-                
+
                 location: `${p.city}, ${p.state}`,
                 status: p.maritalStatus,
                 height: p.height,
@@ -2842,7 +2849,6 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
                 interestStatus: currentStatus
             };
         });
-        
 
         res.json({ 
             success: true, 
@@ -2857,7 +2863,7 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-            
+                                                          
 
 
 // ====================================================================
