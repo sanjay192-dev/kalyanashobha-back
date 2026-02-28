@@ -2797,9 +2797,10 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
             }
         }
 
-        // 8. Execute Query
+                // 8. Execute Query
         let profilesQuery = User.find(query)
-            .select('firstName lastName dob highestQualification subCommunity city state maritalStatus jobRole uniqueId photos height annualIncome')
+            // Added 'community' and 'caste' to the select list here
+            .select('firstName lastName dob highestQualification community caste subCommunity city state maritalStatus jobRole uniqueId photos height annualIncome')
             .sort({ createdAt: -1 });
 
         // Limit Free Users
@@ -2819,8 +2820,6 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
                 age = Math.abs(ageDate.getUTCFullYear() - 1970);
             }
 
-            // LOOKUP STATUS using the Map we created in Step 3
-            // If undefined, it means no interaction exists (null)
             const currentStatus = statusMap[p._id.toString()] || null;
 
             return {
@@ -2830,17 +2829,20 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
                 age: age,
                 occupation: p.jobRole || "Not Specified",
                 education: p.highestQualification || "Not Specified",
+                
+                // NEW: Send both community and subCommunity separately
+                community: p.community || p.caste || "Not Specified",
                 subCommunity: p.subCommunity || "Not Specified",
+                
                 location: `${p.city}, ${p.state}`,
                 status: p.maritalStatus,
                 height: p.height,
                 salary: p.annualIncome,
                 photo: p.photos && p.photos.length > 0 ? p.photos[0] : null,
-                
-                // DYNAMIC STATUS (Fixes the "Always Pending" issue)
                 interestStatus: currentStatus
             };
         });
+        
 
         res.json({ 
             success: true, 
