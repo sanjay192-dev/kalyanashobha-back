@@ -2116,78 +2116,48 @@ app.post("/api/admin/interest/approve-content", verifyAdmin, async (req, res) =>
     }
 });
 
-// 6. User Responds to Interest
+
 app.post("/api/user/interest/respond", verifyUser, async (req, res) => {
     try {
         const { interestId, action } = req.body;
-        
-        // Populate fields to get Names and Emails
+
         const interest = await Interest.findById(interestId)
             .populate('senderId', 'firstName lastName email')
             .populate('receiverId', 'firstName lastName email');
 
-        if (!interest) {
-            return res.status(404).json({ success: false, message: "Interest not found" });
-        }
+        if (!interest) return res.status(404).json({ success: false, message: "Interest not found" });
 
-        // Security check: Ensure the person responding is actually the Receiver
         if (interest.receiverId._id.toString() !== req.userId) {
             return res.status(403).json({ success: false, message: "Not your request" });
         }
 
-        // Get the Receiver's Name (The person responding)
         const receiverName = `${interest.receiverId.firstName} ${interest.receiverId.lastName}`;
 
         if (action === "accept") {
-            interest.status = "Accepted";
-            
-            // 1. SAVE TO DB FIRST (Critical)
+            // Send back to Admin, NOT to User A
+            interest.status = "PendingAdminPhase2";
             await interest.save();
 
-            const senderContent = generateEmailTemplate(
-                "Interest Accepted",
-                `<p>Good news! <strong>${receiverName}</strong> has accepted your interest request.</p>
-                 <p>You may now view their contact details on your dashboard.</p>`
+            const adminContent = generateEmailTemplate(
+                "Interest Accepted (Phase 2 Action Required)",
+                `<p><strong>${receiverName}</strong> has ACCEPTED the interest from <strong>${interest.senderId.firstName}</strong>.</p>
+                 <p>Both users have agreed to connect. Please log in to your dashboard to access their contact details and finalize the match offline.</p>`
             );
+            sendMail({ to: process.env.EMAIL_USER, subject: "Phase 2 Alert: Interest Accepted", html: adminContent });
 
-            // 2. SEND EMAIL (Wait for it)
-            try {
-                await sendMail({ to: interest.senderId.email, subject: "Interest Request Accepted", html: senderContent });
-                console.log("Acceptance email sent.");
-            } catch (emailErr) {
-                console.error("Failed to send acceptance email:", emailErr);
-            }
+            res.json({ success: true, message: "Acceptance sent to Admin. They will contact you shortly." });
 
         } else {
             interest.status = "Declined";
-
-            // 1. SAVE TO DB FIRST
             await interest.save();
-
-            const senderContent = generateEmailTemplate(
-                "Interest Update",
-                `<p><strong>${receiverName}</strong> has declined your interest request.</p>
-                 <p>We encourage you to continue searching for other suitable matches.</p>`
-            );
-
-            // 2. SEND EMAIL (Wait for it)
-            try {
-                await sendMail({ to: interest.senderId.email, subject: "Interest Request Update", html: senderContent });
-                console.log("Decline email sent.");
-            } catch (emailErr) {
-                console.error("Failed to send decline email:", emailErr);
-            }
+            res.json({ success: true, message: "You have declined this request." });
         }
-        
-        res.json({ success: true, message: "Response submitted successfully" });
 
     } catch (e) {
         console.error(e);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-
-
 
 // 7. Get Contact Details
 app.post("/api/user/get-contact", verifyUser, async (req, res) => {
@@ -2244,32 +2214,27 @@ app.get("/api/user/payment-history", verifyUser, async (req, res) => {
 // ====================================================================
 
 // 1. Get "Received" Interests (Requests others sent to ME)
+
 app.get("/api/user/interests/received", verifyUser, async (req, res) => {
     try {
         const requests = await Interest.find({ 
             receiverId: req.userId,
-            status: { $in: ['PendingUser', 'Accepted', 'Declined'] } 
+            status: { $in: ['PendingUser', 'PendingAdminPhase2', 'Finalized', 'Declined'] } 
         })
-        // 1. ADD 'mobileNumber' and 'email' HERE so the DB actually returns them
-        .populate('senderId', 'firstName lastName uniqueId photos jobRole city state annualIncome dob mobileNumber email')
+        // Notice we explicitly EXCLUDE photos, mobileNumber, email, city, and state
+        .populate('senderId', 'firstName lastName uniqueId jobRole highestQualification caste subCommunity')
         .sort({ date: -1 });
 
-        // 2. OPTIONAL BUT RECOMMENDED: Hide details if not 'Accepted' (Security)
+        // Hardcode a permanent lock on sensitive fields just in case
         const formattedRequests = requests.map(req => {
-            const isAccepted = req.status === 'Accepted';
-            
-            // We clone the sender object to avoid modifying the DB document directly
-            const senderData = req.senderId.toObject(); 
-            
-            if (!isAccepted) {
-                senderData.mobileNumber = "Locked";
-                senderData.email = "Locked";
-            }
-            
-            return {
-                ...req.toObject(),
-                senderId: senderData
-            };
+            const senderData = req.senderId ? req.senderId.toObject() : {};
+            senderData.mobileNumber = "Admin Managed";
+            senderData.email = "Admin Managed";
+            senderData.photos = []; 
+            senderData.city = "Hidden";
+            senderData.state = "Hidden";
+
+            return { ...req.toObject(), senderId: senderData };
         });
 
         res.json({ success: true, count: formattedRequests.length, data: formattedRequests });
@@ -2278,28 +2243,29 @@ app.get("/api/user/interests/received", verifyUser, async (req, res) => {
     }
 });
 
-// 2. Get "Sent" Interests (Requests I sent to OTHERS)
 app.get("/api/user/interests/sent", verifyUser, async (req, res) => {
     try {
-        // Find interests where I am the SENDER
         const sentRequests = await Interest.find({ senderId: req.userId })
-        .populate('receiverId', 'firstName lastName uniqueId photos mobileNumber email') // We need contact info if Accepted
+        // EXCLUDE sensitive details
+        .populate('receiverId', 'firstName lastName uniqueId jobRole highestQualification caste subCommunity') 
         .sort({ date: -1 });
 
-        // Transform data to hide contact info unless status is 'Accepted'
         const formattedRequests = sentRequests.map(req => {
-            const isAccepted = req.status === 'Accepted';
+            const receiverData = req.receiverId ? req.receiverId.toObject() : {};
             return {
                 _id: req._id,
                 status: req.status,
                 date: req.date,
                 receiverProfile: {
-                    name: `${req.receiverId.firstName} ${req.receiverId.lastName}`,
-                    photo: req.receiverId.photos[0] || null,
-                    // LOGIC: Only show phone/email if Accepted
-                    mobile: isAccepted ? req.receiverId.mobileNumber : "Locked",
-uniqueId: req.receiverId.uniqueId, 
-                    email: isAccepted ? req.receiverId.email : "Locked"
+                    name: `${receiverData.firstName} ${receiverData.lastName}`,
+                    uniqueId: receiverData.uniqueId,
+                    education: receiverData.highestQualification,
+                    community: receiverData.caste,
+                    subCommunity: receiverData.subCommunity,
+                    // Hard lock
+                    photo: null, 
+                    mobile: "Admin Managed",
+                    email: "Admin Managed"
                 }
             };
         });
@@ -3344,7 +3310,59 @@ app.post("/api/admin/help-center/resolve", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error resolving issue" });
     }
 });
-    
+
+app.post("/api/interest/send", verifyUser, async (req, res) => {
+    try {
+        const { receiverId } = req.body;
+
+        // 1. Fetch user to ensure they are allowed to send requests
+        const user = await User.findById(req.userId);
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        // User must be a paid member to send interests now
+        if (!user.isPaidMember) {
+            return res.status(403).json({ success: false, message: "Please purchase a membership to send interests." });
+        }
+
+        // 2. Duplicate Check
+        const existingInterest = await Interest.findOne({
+            senderId: req.userId,
+            receiverId: receiverId,
+            status: { $ne: 'Rejected' } 
+        });
+
+        if (existingInterest) {
+            let msg = "Request already exists.";
+            if (existingInterest.status === 'Finalized') msg = "The Admin is already managing this connection.";
+            if (existingInterest.status === 'Declined') msg = "This user has previously declined your request.";
+            return res.json({ success: false, message: msg, currentStatus: existingInterest.status });
+        }
+
+        // 3. Create Interest Record directly into Phase 1
+        const interest = new Interest({
+            senderId: req.userId, 
+            receiverId, 
+            status: "PendingAdminPhase1"
+        });
+        await interest.save();
+
+        // 4. Alert the Admin
+        const adminEmailContent = generateEmailTemplate(
+            "New Interest Request (Phase 1)",
+            `<p><strong>${user.firstName}</strong> (${user.uniqueId}) wants to connect with a profile.</p>
+             <p>Please log in to the Admin Dashboard to review and forward the request to the receiver.</p>`
+        );
+
+        sendMail({ to: process.env.EMAIL_USER, subject: "Admin Alert: New Interest Phase 1", html: adminEmailContent });
+
+        res.json({ success: true, message: "Interest request sent to Admin for approval." });
+
+    } catch (e) {
+        console.error("Interest Send Error:", e);
+        return res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 
 
 
