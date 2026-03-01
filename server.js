@@ -2214,15 +2214,15 @@ app.get("/api/user/payment-history", verifyUser, async (req, res) => {
 // ====================================================================
 
 // 1. Get "Received" Interests (Requests others sent to ME)
-
 app.get("/api/user/interests/received", verifyUser, async (req, res) => {
     try {
         const requests = await Interest.find({ 
             receiverId: req.userId,
+            // Show all requests that haven't been completed yet
             status: { $in: ['PendingUser', 'PendingAdminPhase2', 'Finalized', 'Declined'] } 
         })
-        // Notice we explicitly EXCLUDE photos, mobileNumber, email, city, and state
-        .populate('senderId', 'firstName lastName uniqueId jobRole highestQualification caste subCommunity')
+        // POPULATE ALL DASHBOARD FIELDS
+        .populate('senderId', 'firstName lastName uniqueId jobRole highestQualification caste subCommunity city state height maritalStatus dob gender')
         .sort({ date: -1 });
 
         // Hardcode a permanent lock on sensitive fields just in case
@@ -2231,9 +2231,7 @@ app.get("/api/user/interests/received", verifyUser, async (req, res) => {
             senderData.mobileNumber = "Admin Managed";
             senderData.email = "Admin Managed";
             senderData.photos = []; 
-            senderData.city = "Hidden";
-            senderData.state = "Hidden";
-
+            
             return { ...req.toObject(), senderId: senderData };
         });
 
@@ -2243,31 +2241,22 @@ app.get("/api/user/interests/received", verifyUser, async (req, res) => {
     }
 });
 
+// 2. Get "Sent" Interests (Requests I sent to OTHERS)
 app.get("/api/user/interests/sent", verifyUser, async (req, res) => {
     try {
         const sentRequests = await Interest.find({ senderId: req.userId })
-        // EXCLUDE sensitive details
-        .populate('receiverId', 'firstName lastName uniqueId jobRole highestQualification caste subCommunity') 
+        // POPULATE ALL DASHBOARD FIELDS
+        .populate('receiverId', 'firstName lastName uniqueId jobRole highestQualification caste subCommunity city state height maritalStatus dob gender') 
         .sort({ date: -1 });
 
         const formattedRequests = sentRequests.map(req => {
+            // Keep the structure identical to 'received' to make frontend easy
             const receiverData = req.receiverId ? req.receiverId.toObject() : {};
-            return {
-                _id: req._id,
-                status: req.status,
-                date: req.date,
-                receiverProfile: {
-                    name: `${receiverData.firstName} ${receiverData.lastName}`,
-                    uniqueId: receiverData.uniqueId,
-                    education: receiverData.highestQualification,
-                    community: receiverData.caste,
-                    subCommunity: receiverData.subCommunity,
-                    // Hard lock
-                    photo: null, 
-                    mobile: "Admin Managed",
-                    email: "Admin Managed"
-                }
-            };
+            receiverData.mobileNumber = "Admin Managed";
+            receiverData.email = "Admin Managed";
+            receiverData.photos = []; 
+            
+            return { ...req.toObject(), receiverId: receiverData };
         });
 
         res.json({ success: true, count: formattedRequests.length, data: formattedRequests });
@@ -2275,6 +2264,7 @@ app.get("/api/user/interests/sent", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+                
 
 // ====================================================================
 // UPDATED API 1: Advanced List (Fixed Filtering & Agent Populating)
