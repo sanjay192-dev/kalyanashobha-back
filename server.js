@@ -3363,6 +3363,75 @@ app.post("/api/interest/send", verifyUser, async (req, res) => {
     }
 });
 
+// ====================================================================
+// NEW ADMIN WORKFLOW: Get Interests for Phase 1 & Phase 2
+// ====================================================================
+
+app.get("/api/admin/interest/workflow", verifyAdmin, async (req, res) => {
+    try {
+        const { status } = req.query; // e.g., 'PendingAdminPhase1' or 'PendingAdminPhase2'
+        
+        // We can fetch multiple statuses if we separate them by commas in the frontend
+        let query = {};
+        if (status) {
+            query.status = { $in: status.split(',') }; 
+        }
+
+        const interests = await Interest.find(query)
+            .populate('senderId', 'firstName lastName uniqueId mobileNumber email')
+            .populate('receiverId', 'firstName lastName uniqueId mobileNumber email')
+            .sort({ date: -1 });
+
+        res.json({ success: true, count: interests.length, data: interests });
+
+    } catch (e) {
+        console.error("Admin Workflow Fetch Error:", e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// Admin Processes the Interest (Phase 1 Forwarding or Phase 2 Finalizing)
+app.post("/api/admin/interest/process", verifyAdmin, async (req, res) => {
+    try {
+        const { interestId, action, phase } = req.body;
+        
+        const interest = await Interest.findById(interestId)
+            .populate('senderId', 'firstName lastName email')
+            .populate('receiverId', 'firstName lastName email');
+
+        if (!interest) return res.status(404).json({ success: false, message: "Record not found" });
+
+        if (phase === 1) {
+            if (action === "approve") {
+                interest.status = "PendingUser"; // Forward to Receiver
+                await interest.save();
+
+                // Notify Receiver
+                const emailContent = generateEmailTemplate(
+                    "New Match Request",
+                    `<p>You have a new interest request waiting for your response.</p>
+                     <p>Please log in to your dashboard to view the basic details and Accept or Decline.</p>`
+                );
+                sendMail({ to: interest.receiverId.email, subject: "New Interest Request", html: emailContent });
+            } else {
+                interest.status = "Rejected"; // Admin blocks it
+                await interest.save();
+            }
+        } 
+        else if (phase === 2) {
+            if (action === "finalize") {
+                interest.status = "Finalized"; // Admin has completed the offline connection
+                await interest.save();
+            }
+        }
+
+        res.json({ success: true, message: "Request processed successfully" });
+
+    } catch (e) { 
+        console.error("Admin Process Error:", e);
+        res.status(500).json({ success: false, message: "Server Error" }); 
+    }
+});
 
 
 
