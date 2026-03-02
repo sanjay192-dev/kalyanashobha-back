@@ -9,6 +9,7 @@ const cloudinary = require('cloudinary').v2;
 const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const MasterData = require('./models/MasterData');
 
 // ---------------- MODELS ----------------
 const User = require('./models/User');
@@ -3423,6 +3424,76 @@ app.post("/api/admin/interest/process", verifyAdmin, async (req, res) => {
     }
 });
 
+// ====================================================================
+// UNIVERSAL MASTER DATA APIs (State, Education, Occupation, etc.)
+// ====================================================================
+
+// 1. PUBLIC: Get options for a specific category (e.g., /api/public/master-data/State)
+app.get("/api/public/master-data/:category", async (req, res) => {
+    try {
+        const { category } = req.params;
+        const data = await MasterData.find({ category }).select('name subItems').lean();
+        
+        res.json({ success: true, count: data.length, data });
+    } catch (e) {
+        res.status(500).json({ success: false, message: "Server Error fetching master data" });
+    }
+});
+
+// 2. ADMIN: Add a generic category item (Handles single, bulk, and sub-items)
+app.post("/api/admin/master-data", verifyAdmin, async (req, res) => {
+    try {
+        const { category, name, subItems } = req.body;
+
+        if (!category || !name) {
+            return res.status(400).json({ success: false, message: "Category and Name are required" });
+        }
+
+        // SCENARIO 1: Bulk Add (if 'name' is an array like ["B.Tech", "M.Tech"])
+        if (Array.isArray(name)) {
+            const operations = name.map(val => ({
+                updateOne: {
+                    filter: { category, name: val.trim() },
+                    update: { $setOnInsert: { category, name: val.trim(), subItems: [] } },
+                    upsert: true
+                }
+            }));
+            await MasterData.bulkWrite(operations);
+            return res.json({ success: true, message: `Bulk added ${name.length} items to ${category}.` });
+        }
+
+        // SCENARIO 2: Single Add / Append Sub-Items
+        const itemName = name.trim();
+        let subItemsToAdd = [];
+
+        if (subItems) {
+            subItemsToAdd = Array.isArray(subItems) ? subItems.map(s => s.trim()) : [subItems.trim()];
+        }
+
+        const updatedData = await MasterData.findOneAndUpdate(
+            { category, name: itemName },
+            { 
+                $setOnInsert: { category, name: itemName },
+                $addToSet: { subItems: { $each: subItemsToAdd } } 
+            },
+            { new: true, upsert: true }
+        );
+
+        res.json({ success: true, message: "Saved successfully", data: updatedData });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// 3. ADMIN: Delete a Master Data entry
+app.delete("/api/admin/master-data/:id", verifyAdmin, async (req, res) => {
+    try {
+        await MasterData.findByIdAndDelete(req.params.id);
+        res.json({ success: true, message: "Item deleted successfully" });
+    } catch (e) {
+        res.status(500).json({ success: false, message: "Failed to delete item" });
+    }
+});
 
 
 const PORT = process.env.PORT || 5000;
