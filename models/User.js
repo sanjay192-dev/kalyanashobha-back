@@ -16,12 +16,14 @@ const UserSchema = new mongoose.Schema({
   religion: { type: String, required: true },
   community: { type: String, required: true },
   country: { type: String, required: true },
+  gothra: { type: String }, // NEW FIELD (Added during registration)
 
   // --- E. Living Details ---
   state: { type: String, required: true },
   city: { type: String, required: true },
   subCommunity: { type: String },
   caste: { type: String },
+  residentsIn: { type: String, enum: ['Own', 'Rent'] }, // NEW FIELD (Added during registration)
 
   // --- F. Basic Information ---
   maritalStatus: { type: String, required: true },
@@ -40,9 +42,10 @@ const UserSchema = new mongoose.Schema({
 
   // --- I. Contact Info & AUTH ---
   email: { type: String, unique: true, required: true },
-  password: { type: String, required: true }, // ADDED: For Login
+  password: { type: String, required: true }, 
   mobileNumber: { type: String, unique: true, required: true },
   isEmailVerified: { type: Boolean, default: false },
+
   // --- J. Photos ---
   photos: [{ type: String }],
 
@@ -60,12 +63,39 @@ const UserSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },   
   rejectionReason: { type: String },   
 
+  // --- N. Security & Legal ---
   fcmToken: { type: String },
+  digitalSignature: { type: String },   
+  verificationSelfie: { type: String },
+  termsAcceptedAt: { type: Date },
+  termsAcceptedIP: { type: String },
 
-digitalSignature: { type: String },   
-verificationSelfie: { type: String },
-termsAcceptedAt: { type: Date },
-termsAcceptedIP: { type: String },
+  // --- O. ASTROLOGY & FAMILY DETAILS (NEW) ---
+  hasAstrologyAndFamilyDetails: { type: Boolean, default: false }, // Flag for tracking submission
+  
+  astrologyDetails: {
+    moonsign: { type: String },
+    star: { type: String },
+    pada: { type: String },
+    motherTongue: { type: String },
+    timeOfBirth: { type: String },
+    placeOfBirth: { type: String },
+    nativeLocation: { type: String },
+    complexion: { type: String }
+  },
+
+  familyDetails: {
+    fatherName: { type: String },
+    fatherOccupation: { type: String },
+    motherName: { type: String },
+    motherOccupation: { type: String },
+    noOfBrothers: { type: Number },
+    noOfBrothersMarried: { type: Number },
+    noOfSisters: { type: Number },
+    noOfSistersMarried: { type: Number },
+    nri: { type: String, enum: ['Yes', 'No'] }
+  },
+
   createdAt: { type: Date, default: Date.now }
 });
 
