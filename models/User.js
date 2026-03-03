@@ -13,7 +13,7 @@ const UserSchema = new mongoose.Schema({
   dob: { type: Date, required: true },
 
   // --- D. Religion & Community ---
-  religion: { type: String, required: true },
+  religion: { type: String},
   community: { type: String, required: true },
   country: { type: String, required: true },
   gothra: { type: String }, // NEW FIELD (Added during registration)
