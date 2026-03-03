@@ -2542,7 +2542,9 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
             isActive: true, // Agent created profiles are active by default (but might need approval)
             isApproved: false, // Still needs Admin Approval
             isPaidMember: false,
-
+            
+            gothra: data.gothra,
+             residentsIn: data.residentsIn,
             // --- REFERRAL LINKING (FIXED ENUM) ---
             referredByAgentId: agent._id,
             referredByAgentName: agent.name,
