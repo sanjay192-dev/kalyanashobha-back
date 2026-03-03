@@ -145,36 +145,84 @@ const transporter = nodemailer.createTransport({
 const generateEmailTemplate = (title, bodyContent) => {
     return `
     <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <style>
-            body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }
-            .container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border: 1px solid #dddddd; }
-            .header { background-color: #2c3e50; color: #ffffff; padding: 20px; text-align: center; }
-            .header h1 { margin: 0; font-size: 24px; letter-spacing: 1px; }
-            .content { padding: 30px; color: #333333; line-height: 1.6; }
-            .footer { background-color: #f4f4f4; color: #777777; padding: 15px; text-align: center; font-size: 12px; border-top: 1px solid #dddddd; }
-            .button { display: inline-block; padding: 10px 20px; background-color: #2c3e50; color: #ffffff; text-decoration: none; border-radius: 4px; margin-top: 15px; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>KalyanaShobha</h1>
-            </div>
-            <div class="content">
-                <h2 style="color: #2c3e50; font-size: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px;">${title}</h2>
-                ${bodyContent}
-                <p style="margin-top: 30px;">Sincerely,<br>The KalyanaShobha Team</p>
-            </div>
-            <div class="footer">
-                <p>This is an automated message. Please do not reply directly to this email.</p>
-                <p>&copy; ${new Date().getFullYear()} KalyanaShobha Matrimony. All rights reserved.</p>
-            </div>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            background-color: #f4f4f4; 
+            margin: 0; 
+            padding: 0; 
+        }
+        .container { 
+            max-width: 600px; 
+            margin: 20px auto; 
+            background-color: #ffffff; 
+            border: 1px solid #dddddd; 
+        }
+        .header { 
+            background-color: #ffffff; 
+            padding: 20px; 
+            text-align: center; 
+            border-bottom: 1px solid #dddddd;
+        }
+        .header img {
+            max-width: 250px; /* Adjust size as needed */
+            height: auto;
+            margin-bottom: 10px;
+        }
+        .content { 
+            padding: 30px; 
+            color: #333333; 
+            line-height: 1.6; 
+        }
+        .content h2 { 
+            color: #D32F2F; /* Match Kalyana red */
+            font-size: 20px; 
+            border-bottom: 2px solid #FFC107; /* Match Shobha amber */
+            padding-bottom: 10px; 
+        }
+        .footer { 
+            background-color: #f4f4f4; 
+            color: #777777; 
+            padding: 15px; 
+            text-align: center; 
+            font-size: 12px; 
+            border-top: 1px solid #dddddd; 
+        }
+        .button { 
+            display: inline-block; 
+            padding: 10px 20px; 
+            background-color: #D32F2F; /* Match Kalyana red */
+            color: #ffffff; 
+            text-decoration: none; 
+            border-radius: 4px; 
+            margin-top: 15px; 
+        }
+        .button:hover {
+            background-color: #FFC107; /* Match Shobha amber on hover */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <img src="https://res.cloudinary.com/dppiuypop/image/upload/v1772548363/uploads/r94zgmrjfek4kucd6lhf.png" alt="KalyanaShobha Matrimony Services">
         </div>
-    </body>
-    </html>
+        <div class="content">
+            <h2>${title}</h2>
+            ${bodyContent}
+            <p style="margin-top: 30px;">Sincerely,<br>The KalyanaShobha Team</p>
+        </div>
+        <div class="footer">
+            <p>This is an automated message. Please do not reply directly to this email.</p>
+            <p>&copy; ${new Date().getFullYear()} KalyanaShobha Matrimony. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
+
     `;
 };
 
