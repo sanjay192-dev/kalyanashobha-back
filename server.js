@@ -10,6 +10,7 @@ const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const MasterData = require('./models/MasterData');
+const Otp = require('./models/Otp');
 
 // ---------------- MODELS ----------------
 const User = require('./models/User');
@@ -421,30 +422,27 @@ app.get("/api/user/vendors",  async (req, res) => {
 // H. AGENT AUTHENTICATION (Login with OTP)
 // ====================================================================
 
-// 1. Agent Login Init (Password Check -> Send OTP)
+// 1. Agent Login Init 
 app.post("/api/agent/auth/login-init", async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        // 1. Find Agent
         const agent = await Agent.findOne({ email, isActive: true });
         if (!agent) return res.status(404).json({ success: false, message: "Agent not found or inactive" });
 
-        // 2. Validate Password
         const isMatch = await bcrypt.compare(password, agent.password);
         if (!isMatch) return res.status(400).json({ success: false, message: "Invalid credentials" });
 
-        // 3. Generate OTP
-        const otp = Math.floor(100000 + Math.random() * 900000);
-        otpStore[email] = otp; // Reusing your existing otpStore object
-        setTimeout(() => delete otpStore[email], 300000); // 5 mins expiry
+        // Generate OTP and save to MongoDB
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        await Otp.deleteMany({ email }); // Clear old OTPs
+        await Otp.create({ email, otp: otpCode });
 
-        // 4. Send Email
         const emailContent = generateEmailTemplate(
             "Agent Dashboard Access",
             `<p>Hello ${agent.name},</p>
              <p>Your OTP for Agent Dashboard login is:</p>
-             <h2 style="color: #2c3e50; letter-spacing: 5px;">${otp}</h2>`
+             <h2 style="color: #2c3e50; letter-spacing: 5px;">${otpCode}</h2>`
         );
         await sendMail({ to: email, subject: "Agent Login OTP", html: emailContent });
 
@@ -455,14 +453,18 @@ app.post("/api/agent/auth/login-init", async (req, res) => {
     }
 });
 
-// 2. Agent Login Verify (Verify OTP -> Return Token & Details)
+// 2. Agent Login Verify
 app.post("/api/agent/auth/login-verify", async (req, res) => {
     try {
         const { email, otp } = req.body;
 
-        if (otpStore[email] && parseInt(otpStore[email]) === parseInt(otp)) {
+        const otpRecord = await Otp.findOne({ email, otp });
+
+        if (otpRecord) {
             const agent = await Agent.findOne({ email });
-            delete otpStore[email];
+            
+            // Delete OTP after successful use
+            await Otp.deleteOne({ _id: otpRecord._id });
 
             const token = jwt.sign(
                 { id: agent._id, role: 'Agent' }, 
@@ -470,7 +472,6 @@ app.post("/api/agent/auth/login-verify", async (req, res) => {
                 { expiresIn: "1d" }
             );
 
-            // Return Agent Info (Include ID and Name for the Referral Link logic)
             res.json({ 
                 success: true, 
                 token, 
@@ -489,6 +490,7 @@ app.post("/api/agent/auth/login-verify", async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+
 
 
 // ====================================================================
@@ -529,28 +531,23 @@ app.post("/api/admin/seed", async (req, res) => {
 app.post("/api/admin/auth/login-init", async (req, res) => {
     try {
         const { email, password } = req.body;
-        
-        // 1. Check Admin existence
+
         const admin = await Admin.findOne({ email });
         if (!admin) return res.status(404).json({ success: false, message: "Admin not found" });
 
-        // 2. Check Password
         const isMatch = await bcrypt.compare(password, admin.password);
         if (!isMatch) return res.status(400).json({ success: false, message: "Invalid credentials" });
 
-        // 3. Generate OTP
-        const otp = Math.floor(100000 + Math.random() * 900000);
-        otpStore[email] = otp;
+        // Generate OTP and save to MongoDB
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        await Otp.deleteMany({ email });
+        await Otp.create({ email, otp: otpCode });
 
-        // Auto-expire OTP after 5 minutes
-        setTimeout(() => delete otpStore[email], 300000); 
-
-        // 4. Send Email
         const emailContent = generateEmailTemplate(
             "Admin Dashboard Access",
             `<p>A login attempt was made for the Admin Panel.</p>
              <p>Your Verification Code is:</p>
-             <h2 style="color: #c0392b; letter-spacing: 5px; font-weight: bold;">${otp}</h2>
+             <h2 style="color: #c0392b; letter-spacing: 5px; font-weight: bold;">${otpCode}</h2>
              <p>This code is valid for 5 minutes. If this wasn't you, please change your password immediately.</p>`
         );
 
@@ -569,16 +566,14 @@ app.post("/api/admin/auth/login-verify", async (req, res) => {
     try {
         const { email, otp } = req.body;
 
-        // 1. Validate OTP
-        if (otpStore[email] && parseInt(otpStore[email]) === parseInt(otp)) {
-            
-            // 2. Get Admin Details
-            const admin = await Admin.findOne({ email });
-            
-            // 3. Clear OTP to prevent reuse
-            delete otpStore[email]; 
+        const otpRecord = await Otp.findOne({ email, otp });
 
-            // 4. Generate Token
+        if (otpRecord) {
+            const admin = await Admin.findOne({ email });
+
+            // Clear OTP to prevent reuse
+            await Otp.deleteOne({ _id: otpRecord._id }); 
+
             const token = jwt.sign(
                 { id: admin._id, role: admin.role }, 
                 process.env.JWT_SECRET || "fallback_secret_key", 
@@ -598,6 +593,7 @@ app.post("/api/admin/auth/login-verify", async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" }); 
     }
 });
+
 
 app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
     try {
@@ -789,9 +785,7 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
 });
                         
 
-
 // ======================== FORGOT PASSWORD (SEND OTP) =========================
-
 app.post("/api/auth/forgot-password", async (req, res) => {
     try {
         const { email } = req.body;
@@ -801,28 +795,21 @@ app.post("/api/auth/forgot-password", async (req, res) => {
             return res.status(404).json({ success: false, message: "Email not found" });
         }
 
-        // Generate OTP
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        otpStore[email] = otp;
+        // Generate OTP & Save to MongoDB
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        await Otp.deleteMany({ email });
+        await Otp.create({ email, otp: otpCode });
 
-        // Email Template
         const htmlTemplate = generateEmailTemplate(
             "Password Reset OTP",
             `<p>Your OTP for resetting password is:</p>
-             <h2 style="letter-spacing: 3px; color:#2c3e50;">${otp}</h2>
+             <h2 style="letter-spacing: 3px; color:#2c3e50;">${otpCode}</h2>
              <p>This OTP is valid for <strong>5 minutes</strong>.</p>`
         );
 
-        await sendMail({
-            to: email,
-            subject: "Reset Password - OTP Verification",
-            html: htmlTemplate
-        });
+        await sendMail({ to: email, subject: "Reset Password - OTP Verification", html: htmlTemplate });
 
-        res.json({
-            success: true,
-            message: "OTP sent to your registered email."
-        });
+        res.json({ success: true, message: "OTP sent to your registered email." });
 
     } catch (err) {
         console.error(err);
@@ -830,35 +817,36 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     }
 });
 
-
 // ======================== VERIFY OTP =========================
+app.post("/api/auth/verify-otp", async (req, res) => {
+    try {
+        const { email, otp } = req.body;
 
-app.post("/api/auth/verify-otp", (req, res) => {
-    const { email, otp } = req.body;
+        const otpRecord = await Otp.findOne({ email, otp });
 
-    if (!otpStore[email]) {
-        return res.status(400).json({ success: false, message: "OTP not requested or expired" });
+        if (!otpRecord) {
+            return res.status(400).json({ success: false, message: "Invalid or Expired OTP" });
+        }
+
+        // OTP matched - update the record to mark it as verified
+        otpRecord.otp = "VERIFIED";
+        await otpRecord.save();
+
+        res.json({ success: true, message: "OTP verified successfully" });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Server Error" });
     }
-
-    if (otpStore[email] !== otp) {
-        return res.status(400).json({ success: false, message: "Invalid OTP" });
-    }
-
-    // OTP matched - allow reset
-    otpStore[email] = "VERIFIED";
-
-    res.json({ success: true, message: "OTP verified successfully" });
 });
 
-
 // ======================== RESET PASSWORD =========================
-
 app.post("/api/auth/reset-password", async (req, res) => {
     try {
         const { email, newPassword } = req.body;
 
-        if (!otpStore[email] || otpStore[email] !== "VERIFIED") {
-            return res.status(400).json({ success: false, message: "OTP not verified" });
+        // Check if there is a VERIFIED record in the database
+        const verifiedRecord = await Otp.findOne({ email, otp: "VERIFIED" });
+        if (!verifiedRecord) {
+            return res.status(400).json({ success: false, message: "OTP not verified or session expired" });
         }
 
         const user = await User.findOne({ email });
@@ -873,8 +861,8 @@ app.post("/api/auth/reset-password", async (req, res) => {
         user.password = hashedPassword;
         await user.save();
 
-        // Delete used OTP
-        delete otpStore[email];
+        // Delete used OTP record
+        await Otp.deleteOne({ _id: verifiedRecord._id });
 
         res.json({ success: true, message: "Password reset successful!" });
 
@@ -882,7 +870,9 @@ app.post("/api/auth/reset-password", async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+                              
 
+        
 
 
 
@@ -983,40 +973,35 @@ app.get("/api/user/photos-status", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+
 app.post("/api/auth/login-init", async (req, res) => {
     try {
         const { email, password } = req.body;
-        
-        // 1. Find user by email ONLY (Removed isActive: true check here)
+
         const user = await User.findOne({ email }); 
-        
-        // 2. If user doesn't exist at all
-        if (!user) {
-            return res.status(404).json({ success: false, message: "User not found" });
-        }
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-        // 3. SPECIFIC CHECK: If user exists but is restricted (isActive is false)
         if (!user.isActive) {
-            return res.status(403).json({ 
-                success: false, 
-                message: "ACCESS DENIED: Your account has been restricted by Admin." 
-            });
+            return res.status(403).json({ success: false, message: "ACCESS DENIED: Your account has been restricted by Admin." });
         }
 
-        // 4. Validate Password
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(400).json({ success: false, message: "Invalid credentials" });
 
-        // 5. Generate OTP (Rest of your logic remains same)
-        const otp = Math.floor(100000 + Math.random() * 900000);
-        otpStore[email] = otp;
-        setTimeout(() => delete otpStore[email], 300000); 
+        // Generate OTP
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+        // Delete any existing OTPs for this email to prevent duplicates
+        await Otp.deleteMany({ email });
+
+        // Save new OTP to MongoDB
+        await Otp.create({ email, otp: otpCode });
 
         const emailContent = generateEmailTemplate(
             "Login Authentication",
             `<p>You have requested to log in to your account.</p>
              <p>Your One-Time Password (OTP) is:</p>
-             <h2 style="color: #2c3e50; letter-spacing: 5px;">${otp}</h2>
+             <h2 style="color: #2c3e50; letter-spacing: 5px;">${otpCode}</h2>
              <p>This code is valid for 5 minutes. Do not share this code with anyone.</p>`
         );
 
@@ -1028,20 +1013,30 @@ app.post("/api/auth/login-init", async (req, res) => {
     }
 });
 
-
 app.post("/api/auth/login-verify", async (req, res) => {
     try {
         const { email, otp } = req.body;
-        if (otpStore[email] && parseInt(otpStore[email]) === parseInt(otp)) {
+        
+        // Find the OTP in the database
+        const otpRecord = await Otp.findOne({ email, otp });
+
+        if (otpRecord) {
             const user = await User.findOne({ email });
-            delete otpStore[email]; 
+            
+            // Delete the OTP immediately after successful use
+            await Otp.deleteOne({ _id: otpRecord._id }); 
+            
             const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || "fallback_secret_key", { expiresIn: "7d" });
             res.json({ success: true, token, user });
         } else {
             res.status(400).json({ success: false, message: "Invalid or Expired OTP" });
         }
-    } catch (e) { res.status(500).json({ success: false }); }
+    } catch (e) { 
+        res.status(500).json({ success: false, message: "Server Error" }); 
+    }
 });
+
+
 
 // ====================================================================
 // C. SEARCH (Public)
