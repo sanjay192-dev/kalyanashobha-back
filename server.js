@@ -177,13 +177,16 @@ const generateEmailTemplate = (title, bodyContent) => {
     `;
 };
 
+
+
 async function sendMail({ to, subject, html }) {
     try {
         await transporter.sendMail({
-            from: `"KalyanaShobha Notifications" <${process.env.EMAIL_USER}>`,
+            // FIXED: Matches the auth user exactly
+            from: `"KalyanaShobha Notifications" <support@kalyanashobha.in>`, 
             to, 
             subject,
-            html // The HTML is already formatted by generateEmailTemplate before being passed here
+            html 
         });
         return true;
     } catch (err) {
@@ -191,7 +194,6 @@ async function sendMail({ to, subject, html }) {
         return false;
     }
 }
-
 
 
 
