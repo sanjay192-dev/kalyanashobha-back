@@ -144,82 +144,68 @@ const transporter = nodemailer.createTransport({
 // Professional HTML Template Generator
 const generateEmailTemplate = (title, bodyContent) => {
     return `
-    <!DOCTYPE html>
+     <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            background-color: #f4f4f4; 
-            margin: 0; 
-            padding: 0; 
-        }
-        .container { 
-            max-width: 600px; 
-            margin: 20px auto; 
-            background-color: #ffffff; 
-            border: 1px solid #dddddd; 
-        }
-        .header { 
-            background-color: #ffffff; 
-            padding: 20px; 
-            text-align: center; 
-            border-bottom: 1px solid #dddddd;
-        }
-        .header img {
-            max-width: 250px; /* Adjust size as needed */
-            height: auto;
-            margin-bottom: 10px;
-        }
-        .content { 
-            padding: 30px; 
-            color: #333333; 
-            line-height: 1.6; 
-        }
-        .content h2 { 
-            color: #D32F2F; /* Match Kalyana red */
-            font-size: 20px; 
-            border-bottom: 2px solid #FFC107; /* Match Shobha amber */
-            padding-bottom: 10px; 
-        }
-        .footer { 
-            background-color: #f4f4f4; 
-            color: #777777; 
-            padding: 15px; 
-            text-align: center; 
-            font-size: 12px; 
-            border-top: 1px solid #dddddd; 
-        }
-        .button { 
-            display: inline-block; 
-            padding: 10px 20px; 
-            background-color: #D32F2F; /* Match Kalyana red */
-            color: #ffffff; 
-            text-decoration: none; 
-            border-radius: 4px; 
-            margin-top: 15px; 
-        }
-        .button:hover {
-            background-color: #FFC107; /* Match Shobha amber on hover */
-        }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <img src="https://res.cloudinary.com/dppiuypop/image/upload/v1772548363/uploads/r94zgmrjfek4kucd6lhf.png" alt="KalyanaShobha Matrimony Services">
-        </div>
-        <div class="content">
-            <h2>${title}</h2>
-            ${bodyContent}
-            <p style="margin-top: 30px;">Sincerely,<br>The KalyanaShobha Team</p>
-        </div>
-        <div class="footer">
-            <p>This is an automated message. Please do not reply directly to this email.</p>
-            <p>&copy; ${new Date().getFullYear()} KalyanaShobha Matrimony. All rights reserved.</p>
-        </div>
-    </div>
+
+<body style="margin:0; padding:0; background:#f5f5f5; font-family:Arial, Helvetica, sans-serif;">
+
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5; padding:20px 0;">
+    <tr>
+      <td>
+
+        <!-- MAIN CARD -->
+        <table align="center" cellpadding="0" cellspacing="0" width="600"
+               style="background:#ffffff; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.08); border:1px solid #e6e6e6;">
+          
+          <!-- LOGO -->
+          <tr>
+            <td align="center" style="padding:25px 20px; border-bottom:1px solid #eeeeee;">
+              <img src="https://res.cloudinary.com/dppiuypop/image/upload/v1772548363/uploads/r94zgmrjfek4kucd6lhf.png"
+                   alt="KalyanaShobha Logo"
+                   style="width:180px; max-width:70%; height:auto; display:block;">
+            </td>
+          </tr>
+
+          <!-- CONTENT -->
+          <tr>
+            <td style="padding:30px 40px; color:#333333; line-height:1.7; font-size:15px;">
+              
+              <h2 style="margin:0 0 15px 0; font-size:20px; color:#D32F2F; 
+                         border-bottom:2px solid #FFC107; display:inline-block; padding-bottom:5px;">
+                ${title}
+              </h2>
+
+              <div style="margin-top:15px; font-size:15px; color:#444444;">
+                ${bodyContent}
+              </div>
+
+              <p style="margin-top:35px; margin-bottom:0; font-size:15px;">
+                Sincerely,<br>
+                <strong>The KalyanaShobha Team</strong>
+              </p>
+
+            </td>
+          </tr>
+
+          <!-- FOOTER -->
+          <tr>
+            <td style="background:#fafafa; text-align:center; padding:15px; 
+                       font-size:12px; color:#888888; border-top:1px solid #e6e6e6;">
+              <p style="margin:0;">This is an automated message. Please do not reply.</p>
+              <p style="margin:3px 0 0 0;">&copy; ${new Date().getFullYear()} KalyanaShobha Matrimony. All rights reserved.</p>
+            </td>
+          </tr>
+
+        </table>
+
+      </td>
+    </tr>
+  </table>
+
 </body>
 </html>
 
