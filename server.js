@@ -127,6 +127,8 @@ const issueStorage = new CloudinaryStorage({
     }
 });
 const uploadIssue = multer({ storage: issueStorage });
+const EMAIL_USER = "support@kalyanashobha.in";
+
 
 
 // ---------------- EMAIL SYSTEM (PROFESSIONAL - HOSTINGER) ----------------
@@ -757,7 +759,7 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
         });
 
         const sendAdminMail = sendMail({ 
-            to: process.env.EMAIL_USER, // Sends to your admin email
+            to: EMAIL_USER, // Sends to your admin email
             subject: `New User: ${user.uniqueId} (${user.firstName})`, 
             html: adminAlertContent 
         });
