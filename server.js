@@ -3534,6 +3534,74 @@ app.post("/api/admin/master-data", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: e.message });
     }
 });
+// POST: Add or Update Astrology & Family details
+app.post("/api/user/extra-details", async (req, res) => {
+    try {
+        const { 
+            userId, // The MongoDB _id of the user
+            astrologyDetails, 
+            familyDetails 
+        } = req.body;
+
+        if (!userId) {
+            return res.status(400).json({ success: false, message: "User ID is required" });
+        }
+
+        // Find the user and update their details
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            {
+                $set: {
+                    astrologyDetails: astrologyDetails,
+                    familyDetails: familyDetails,
+                    hasAstrologyAndFamilyDetails: true // Mark as submitted
+                }
+            },
+            { new: true } // Return the updated document
+        );
+
+        if (!updatedUser) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        res.json({ 
+            success: true, 
+            message: "Astrology and Family details updated successfully!",
+            hasAstrologyAndFamilyDetails: updatedUser.hasAstrologyAndFamilyDetails
+        });
+
+    } catch (error) {
+        console.error("Error updating extra details:", error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+
+// GET: Fetch Astrology & Family details
+app.get("/api/user/extra-details/:userId", async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const user = await User.findById(userId).select('astrologyDetails familyDetails hasAstrologyAndFamilyDetails');
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        res.json({ 
+            success: true, 
+            hasAstrologyAndFamilyDetails: user.hasAstrologyAndFamilyDetails,
+            astrologyDetails: user.astrologyDetails,
+            familyDetails: user.familyDetails
+        });
+
+    } catch (error) {
+        console.error("Error fetching extra details:", error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+
 
 // 3. ADMIN: Delete a Master Data entry
 app.delete("/api/admin/master-data/:id", verifyAdmin, async (req, res) => {
