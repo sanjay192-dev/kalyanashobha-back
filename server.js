@@ -128,14 +128,17 @@ const issueStorage = new CloudinaryStorage({
 const uploadIssue = multer({ storage: issueStorage });
 
 
-// ---------------- EMAIL SYSTEM (PROFESSIONAL) ----------------
+// ---------------- EMAIL SYSTEM (PROFESSIONAL - HOSTINGER) ----------------
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.hostinger.com",
+  port: 465,               // use 465 for secure SSL
+  secure: true,            // true for port 465
   auth: {
-    user: "adepusanjay444@gmail.com",
-    pass: "lrnesuqvssiognej"   // Gmail App Password
+    user: "support@kalyanashobha.in",   // your domain email
+    pass: "Ksm@2026"         // Hostinger email password
   }
 });
+
 
 // Professional HTML Template Generator
 const generateEmailTemplate = (title, bodyContent) => {
