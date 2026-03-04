@@ -3628,30 +3628,33 @@ app.post("/api/user/extra-details", async (req, res) => {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        // --- NEW: Staging Logic for Custom User Data ---
-        // Run this in the background to not hold up the user's response
+        // --- STAGING LOGIC: Push custom data to Admin ---
         const stageNewExtraDetailsData = async () => {
             try {
+                // Added Pada here so it gets verified too
                 const fieldsToCheck = [
                     { category: 'Moonsign', value: astrologyDetails.moonsign },
                     { category: 'Star', value: astrologyDetails.star },
+                    { category: 'Pada', value: astrologyDetails.pada }, 
                     { category: 'MotherTongue', value: astrologyDetails.motherTongue },
                     { category: 'Complexion', value: astrologyDetails.complexion }
                 ];
 
                 for (const item of fieldsToCheck) {
-                    if (!item.value) continue;
-                    
-                    // Check if it already exists in the real MasterData
+                    if (!item.value || typeof item.value !== 'string') continue;
+
+                    // Clean string to prevent silent DB match failures
+                    const val = item.value.trim();
+                    if (!val) continue;
+
                     const exists = await MasterData.findOne({ 
                         category: item.category, 
-                        name: new RegExp(`^${item.value}$`, 'i') 
+                        name: new RegExp(`^${val}$`, 'i') 
                     });
 
                     if (!exists) {
-                        // If it doesn't exist, push to pending queue for Admin Approval
                         await PendingMasterData.updateOne(
-                            { category: item.category, value: item.value },
+                            { category: item.category, value: val }, 
                             { $setOnInsert: { status: 'Pending', submittedBy: userId } },
                             { upsert: true }
                         );
@@ -3662,7 +3665,6 @@ app.post("/api/user/extra-details", async (req, res) => {
             }
         };
 
-        // Trigger the background check
         stageNewExtraDetailsData().catch(console.error);
 
         res.json({ 
@@ -3676,6 +3678,7 @@ app.post("/api/user/extra-details", async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 });
+                        
 
 
 // GET: Fetch Astrology & Family details
