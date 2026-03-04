@@ -3601,6 +3601,53 @@ app.delete("/api/admin/master-data/:id", verifyAdmin, async (req, res) => {
     }
 });
 
+// ====================================================================
+// DELETE: Main Community
+// ====================================================================
+app.delete("/api/admin/community/:id", verifyAdmin, async (req, res) => {
+    try {
+        const deletedCommunity = await Community.findByIdAndDelete(req.params.id);
+        
+        if (!deletedCommunity) {
+            return res.status(404).json({ success: false, message: "Community not found" });
+        }
+        
+        res.json({ success: true, message: "Main community deleted successfully" });
+    } catch (e) {
+        console.error("Delete Community Error:", e);
+        res.status(500).json({ success: false, message: "Failed to delete community" });
+    }
+});
+
+// ====================================================================
+// DELETE: Sub-Community
+// ====================================================================
+app.delete("/api/admin/community/:id/sub/:subName", verifyAdmin, async (req, res) => {
+    try {
+        const { id, subName } = req.params;
+
+        // $pull removes the specific subName string from the subCommunities array
+        const updatedCommunity = await Community.findByIdAndUpdate(
+            id,
+            { $pull: { subCommunities: subName } },
+            { new: true } // Returns the updated document
+        );
+
+        if (!updatedCommunity) {
+            return res.status(404).json({ success: false, message: "Community not found" });
+        }
+
+        res.json({ 
+            success: true, 
+            message: `Sub-community "${subName}" removed successfully`, 
+            data: updatedCommunity 
+        });
+    } catch (e) {
+        console.error("Delete Sub-Community Error:", e);
+        res.status(500).json({ success: false, message: "Failed to delete sub-community" });
+    }
+});
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
