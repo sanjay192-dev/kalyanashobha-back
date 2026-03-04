@@ -3597,11 +3597,12 @@ app.post("/api/admin/master-data", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: e.message });
     }
 });
+
 // POST: Add or Update Astrology & Family details
 app.post("/api/user/extra-details", async (req, res) => {
     try {
         const { 
-            userId, // The MongoDB _id of the user
+            userId, 
             astrologyDetails, 
             familyDetails 
         } = req.body;
@@ -3610,22 +3611,59 @@ app.post("/api/user/extra-details", async (req, res) => {
             return res.status(400).json({ success: false, message: "User ID is required" });
         }
 
-        // Find the user and update their details
+        // 1. Find the user and update their details
         const updatedUser = await User.findByIdAndUpdate(
             userId,
             {
                 $set: {
                     astrologyDetails: astrologyDetails,
                     familyDetails: familyDetails,
-                    hasAstrologyAndFamilyDetails: true // Mark as submitted
+                    hasAstrologyAndFamilyDetails: true 
                 }
             },
-            { new: true } // Return the updated document
+            { new: true } 
         );
 
         if (!updatedUser) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
+
+        // --- NEW: Staging Logic for Custom User Data ---
+        // Run this in the background to not hold up the user's response
+        const stageNewExtraDetailsData = async () => {
+            try {
+                const fieldsToCheck = [
+                    { category: 'Moonsign', value: astrologyDetails.moonsign },
+                    { category: 'Star', value: astrologyDetails.star },
+                    { category: 'MotherTongue', value: astrologyDetails.motherTongue },
+                    { category: 'Complexion', value: astrologyDetails.complexion }
+                ];
+
+                for (const item of fieldsToCheck) {
+                    if (!item.value) continue;
+                    
+                    // Check if it already exists in the real MasterData
+                    const exists = await MasterData.findOne({ 
+                        category: item.category, 
+                        name: new RegExp(`^${item.value}$`, 'i') 
+                    });
+
+                    if (!exists) {
+                        // If it doesn't exist, push to pending queue for Admin Approval
+                        await PendingMasterData.updateOne(
+                            { category: item.category, value: item.value },
+                            { $setOnInsert: { status: 'Pending', submittedBy: userId } },
+                            { upsert: true }
+                        );
+                    }
+                }
+            } catch (err) {
+                console.error("Error staging extra details master data:", err);
+            }
+        };
+
+        // Trigger the background check
+        stageNewExtraDetailsData().catch(console.error);
 
         res.json({ 
             success: true, 
