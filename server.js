@@ -1009,24 +1009,29 @@ app.put("/api/user/update-profile", verifyUser, async (req, res) => {
         const { 
             firstName, lastName, religion, caste, subCommunity, 
             state, city, education, jobRole, annualIncome, 
-            height, diet, maritalStatus, aboutMe 
+            height, diet, maritalStatus, aboutMe,
+            // --- NEW FIELDS ---
+            gothra, residentsIn, astrologyDetails, familyDetails 
         } = req.body;
 
-        // Create an update object (prevent updating sensitive fields like email/password here)
         const updateData = {
             firstName, lastName, religion, caste, subCommunity,
             state, city, highestQualification: education, jobRole, annualIncome,
-            height, diet, maritalStatus, aboutMe
+            height, diet, maritalStatus, aboutMe,
+            // --- NEW FIELDS ---
+            gothra, residentsIn, astrologyDetails, familyDetails,
+            hasAstrologyAndFamilyDetails: true // Flag as submitted once they update
         };
 
         const updatedUser = await User.findByIdAndUpdate(
             req.userId, 
             { $set: updateData },
-            { new: true } // Return the updated document
+            { new: true } 
         ).select("-password");
 
         res.json({ success: true, message: "Profile Updated", user: updatedUser });
     } catch (e) {
+        console.error("Profile Update Error:", e);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
