@@ -11,7 +11,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const MasterData = require('./models/MasterData');
 const Otp = require('./models/Otp');
-
+const PendingMasterData = require('./models/PendingMasterData');
 // ---------------- MODELS ----------------
 const User = require('./models/User');
 const Agent = require('./models/Agent');
@@ -646,7 +646,78 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 });
 
 
-const otpStore = {}; 
+
+// Add this helper function above your register route
+const checkAndStageNewMasterData = async (userId, data) => {
+    try {
+        // 1. Standard MasterData fields to check
+        const standardCategories = [
+            { category: 'Country', value: data.country },
+            { category: 'State', value: data.state },
+            { category: 'City', value: data.city },
+            { category: 'Education', value: data.highestQualification },
+            { category: 'Designation', value: data.jobRole },
+            { category: 'Income', value: data.annualIncome }
+        ];
+
+        for (const item of standardCategories) {
+            if (!item.value) continue;
+            
+            // Check if it exists in MasterData (case-insensitive)
+            const exists = await MasterData.findOne({ 
+                category: item.category, 
+                name: new RegExp(`^${item.value}$`, 'i') 
+            });
+
+            if (!exists) {
+                // If it doesn't exist, push to pending queue (upsert prevents duplicates)
+                await PendingMasterData.updateOne(
+                    { category: item.category, value: item.value },
+                    { $setOnInsert: { status: 'Pending', submittedBy: userId } },
+                    { upsert: true }
+                );
+            }
+        }
+
+        // 2. Specialized Community / SubCommunity Logic
+        if (data.community) {
+            const commExists = await Community.findOne({ 
+                name: new RegExp(`^${data.community}$`, 'i') 
+            });
+
+            if (!commExists) {
+                // Community doesn't exist
+                await PendingMasterData.updateOne(
+                    { category: 'Community', value: data.community },
+                    { $setOnInsert: { status: 'Pending', submittedBy: userId } },
+                    { upsert: true }
+                );
+            }
+
+            // Check SubCommunity
+            if (data.subCommunity) {
+                let subExists = false;
+                if (commExists && commExists.subCommunities) {
+                    subExists = commExists.subCommunities.some(
+                        sub => sub.toLowerCase() === data.subCommunity.toLowerCase()
+                    );
+                }
+
+                if (!subExists) {
+                    // SubCommunity doesn't exist under this Community
+                    await PendingMasterData.updateOne(
+                        { category: 'SubCommunity', value: data.subCommunity, parentValue: data.community },
+                        { $setOnInsert: { status: 'Pending', submittedBy: userId } },
+                        { upsert: true }
+                    );
+                }
+            }
+        }
+    } catch (err) {
+        console.error("Error staging new master data:", err);
+    }
+};
+
 
 // 1. REGISTER (Updated to use Multer for Multipart Upload)
 
@@ -699,7 +770,11 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
 
         // --- STEP 3: SAVE TO DB ---
         await user.save();
+        
 
+        // --- NEW: Check for unverified dropdown data (runs in background) ---
+        checkAndStageNewMasterData(user._id, data).catch(console.error);
+        
         // --- STEP 4: PREPARE EMAILS (Your Custom Templates) ---
 
         // A. Welcome Email Content
@@ -3647,6 +3722,79 @@ app.delete("/api/admin/community/:id/sub/:subName", verifyAdmin, async (req, res
         res.status(500).json({ success: false, message: "Failed to delete sub-community" });
     }
 });
+// ====================================================================
+// ADMIN: PENDING MASTER DATA APPROVALS
+// ====================================================================
+
+// 1. Fetch all pending master data
+app.get("/api/admin/pending-data", verifyAdmin, async (req, res) => {
+    try {
+        const pendingData = await PendingMasterData.find({ status: 'Pending' })
+            .populate('submittedBy', 'firstName lastName uniqueId')
+            .sort({ createdAt: -1 });
+            
+        res.json({ success: true, count: pendingData.length, data: pendingData });
+    } catch (e) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// 2. Approve or Reject Data
+app.post("/api/admin/pending-data/action", verifyAdmin, async (req, res) => {
+    try {
+        const { pendingId, action } = req.body; // action: 'approve' or 'reject'
+
+        const pendingEntry = await PendingMasterData.findById(pendingId);
+        if (!pendingEntry) {
+            return res.status(404).json({ success: false, message: "Pending entry not found" });
+        }
+
+        if (action === 'approve') {
+            const { category, value, parentValue } = pendingEntry;
+
+            // --- A. Handle Community ---
+            if (category === 'Community') {
+                await Community.findOneAndUpdate(
+                    { name: new RegExp(`^${value}$`, 'i') },
+                    { $setOnInsert: { name: value } }, // Only set if not exists
+                    { upsert: true }
+                );
+            } 
+            // --- B. Handle Sub-Community ---
+            else if (category === 'SubCommunity') {
+                // Ensure the parent community exists, then add the sub-community
+                await Community.findOneAndUpdate(
+                    { name: new RegExp(`^${parentValue}$`, 'i') },
+                    { 
+                        $setOnInsert: { name: parentValue }, // Creates parent if missing
+                        $addToSet: { subCommunities: value } // Adds sub to array
+                    },
+                    { upsert: true }
+                );
+            } 
+            // --- C. Handle Standard MasterData ---
+            else {
+                await MasterData.findOneAndUpdate(
+                    { category: category, name: new RegExp(`^${value}$`, 'i') },
+                    { $setOnInsert: { category: category, name: value } },
+                    { upsert: true }
+                );
+            }
+
+            pendingEntry.status = 'Approved';
+        } else {
+            pendingEntry.status = 'Rejected';
+        }
+
+        await pendingEntry.save();
+        res.json({ success: true, message: `Data ${action}d successfully` });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
 
 
 const PORT = process.env.PORT || 5000;
