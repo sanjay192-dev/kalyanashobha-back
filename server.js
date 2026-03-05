@@ -2543,8 +2543,7 @@ app.get("/api/agent/users", verifyAgent, async (req, res) => {
     }
 });
 
-
-            // 3. Register a User (Manual Entry by Agent) - WITH PENDING MASTER DATA LOGIC
+// 3. Register a User (Manual Entry by Agent) - Includes Pending Data Staging
 app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
     try {
         const data = req.body; 
@@ -2564,7 +2563,7 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
         }
 
         // 2. Prepare Data
-        const uniqueId = await generateUserId(data.state); 
+        const uniqueId = await generateUserId(data.state); // Generates ID based on State
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
 
@@ -2608,24 +2607,20 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
         // 4. Save to DB
         await user.save();
 
-        // ---------------------------------------------------------
-        // --- NEW: Staging Logic for Custom Agent Input Data ---
-        // ---------------------------------------------------------
-        const checkAndStageAgentMasterData = async () => {
+        // --- NEW: Staging Logic for Custom Master Data Typed by Agent ---
+        // Runs in the background
+        const stageNewMasterDataFromAgent = async () => {
             try {
+                // 1. Check Standard Categories
                 const fieldsToCheck = [
                     { category: 'Country', value: data.country },
                     { category: 'State', value: data.state },
                     { category: 'City', value: data.city },
                     { category: 'Education', value: data.highestQualification },
                     { category: 'Designation', value: data.jobRole },
-                    { category: 'Income', value: data.annualIncome },
-                    { category: 'MaritalStatus', value: data.maritalStatus },
-                    { category: 'Diet', value: data.diet },
-                    { category: 'Sector', value: data.workType }
+                    { category: 'Income', value: data.annualIncome }
                 ];
 
-                // 1. Check Standard Fields
                 for (const item of fieldsToCheck) {
                     if (!item.value || typeof item.value !== 'string') continue;
                     const val = item.value.trim();
@@ -2639,15 +2634,17 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
                     if (!exists) {
                         await PendingMasterData.updateOne(
                             { category: item.category, value: val },
-                            { $setOnInsert: { status: 'Pending', submittedBy: user._id } }, // tied to the created user
+                            { $setOnInsert: { status: 'Pending', submittedBy: user._id } },
                             { upsert: true }
                         );
                     }
                 }
 
-                // 2. Check Community / SubCommunity
-                if (data.community) {
+                // 2. Check Community & SubCommunity
+                if (data.community && typeof data.community === 'string') {
                     const commVal = data.community.trim();
+                    if (!commVal) return;
+
                     const commExists = await Community.findOne({ 
                         name: new RegExp(`^${commVal}$`, 'i') 
                     });
@@ -2660,18 +2657,20 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
                         );
                     }
 
-                    if (data.caste) {
-                        const subVal = data.caste.trim();
+                    if (data.caste && typeof data.caste === 'string') {
+                        const casteVal = data.caste.trim();
+                        if (!casteVal) return;
+
                         let subExists = false;
                         if (commExists && commExists.subCommunities) {
                             subExists = commExists.subCommunities.some(
-                                sub => sub.toLowerCase() === subVal.toLowerCase()
+                                sub => sub.toLowerCase() === casteVal.toLowerCase()
                             );
                         }
 
                         if (!subExists) {
                             await PendingMasterData.updateOne(
-                                { category: 'SubCommunity', value: subVal, parentValue: commVal },
+                                { category: 'SubCommunity', value: casteVal, parentValue: commVal },
                                 { $setOnInsert: { status: 'Pending', submittedBy: user._id } },
                                 { upsert: true }
                             );
@@ -2679,20 +2678,19 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
                     }
                 }
             } catch (err) {
-                console.error("Error staging new master data from Agent:", err);
+                console.error("Error staging master data from Agent Registration:", err);
             }
         };
 
-        // Run the background check
-        checkAndStageAgentMasterData().catch(console.error);
+        stageNewMasterDataFromAgent().catch(console.error);
 
-        // 5. PREPARE & SEND EMAILS
+        // 5. PREPARE EMAILS
         const userWelcomeContent = generateEmailTemplate(
             "Welcome to KalyanaShobha",
             `<p>Dear ${user.firstName},</p>
              <p>Your profile has been created by our agent <strong>${agent.name}</strong>.</p>
              <p><strong>Profile ID:</strong> ${user.uniqueId}</p>
- <p><strong>Gmail :</strong> ${user.email}</p>
+             <p><strong>Email :</strong> ${user.email}</p>
              <p><strong>Login Password:</strong> ${data.password}</p>
              <p>Please login to your dashboard to view matches.</p>`
         );
@@ -2708,10 +2706,7 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
              <p>You have successfully registered a new user manually on KalyanaShobha.</p>
              <p><strong>User Name:</strong> ${user.firstName} ${user.lastName}</p>
              <p><strong>Profile ID:</strong> ${user.uniqueId}</p>
-             <p>This user has been added to your referral list and you can track their status in your agent dashboard.</p>
-             <div style="margin-top: 20px; text-align: center;">
-                <a href="https://kalyanashobha-agent.vercel.app" style="background-color: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-size: 14px;">Go to Dashboard</a>
-             </div>`
+             <p>This user has been added to your referral list and you can track their status in your agent dashboard.</p>`
         );
         const sendAgentMail = sendMail({ 
             to: agent.email, 
@@ -2719,9 +2714,9 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
             html: agentNotificationContent 
         });
 
+        // 6. SEND EMAILS
         try {
             await Promise.all([sendUserMail, sendAgentMail]);
-            console.log("Agent manual registration emails sent successfully.");
         } catch (emailError) {
             console.error("Email Sending Failed:", emailError);
         }
@@ -2734,6 +2729,8 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
     }
 });
 
+            
+        
 
 
 
