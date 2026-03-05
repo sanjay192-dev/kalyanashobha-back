@@ -2763,7 +2763,7 @@ app.post("/api/admin/users/restrict", verifyAdmin, async (req, res) => {
     }
 });
 
-  // ====================================================================
+// ====================================================================
 // UNIFIED DASHBOARD & SEARCH API (With Interest Status Check)
 // ====================================================================
 app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
@@ -2776,28 +2776,20 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
         const targetGender = currentUser.gender === 'Male' ? 'Female' : 'Male';
 
         // 2. FETCH INTERACTIONS (The "Check First" Logic)
-        // Find any interest where the current user is the sender OR receiver
         const interactions = await Interest.find({
-            $or: [
-                { senderId: req.userId }, 
-                { receiverId: req.userId }
-            ]
+            $or: [{ senderId: req.userId }, { receiverId: req.userId }]
         });
 
         // 3. Create Status Map
-        // Key: Other User's ID -> Value: Status (e.g., 'PendingUser', 'Accepted')
         const statusMap = {};
         interactions.forEach(inter => {
             const otherId = inter.senderId.toString() === req.userId.toString() 
                 ? inter.receiverId.toString() 
                 : inter.senderId.toString();
-
-            // If I sent it, the status is what is in DB. 
-            // If I received it, the logic might differ slightly visually, but usually we just show the status.
             statusMap[otherId] = inter.status; 
         });
 
-        // 4. Destructure Filters from Body (ADDED 'community' here)
+        // 4. Destructure Filters from Body (ADDED PADA AND COUNTRY)
         const {
             searchId,
             minAge, maxAge,
@@ -2807,11 +2799,19 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
             community, 
             subCommunity,
             maritalStatus,
-            occupation
+            occupation,
+            // New Location / Astro Filters
+            country,
+            state,
+            city,
+            diet,
+            motherTongue,
+            star,
+            pada 
         } = req.body;
 
-        // 5. CHECK PERMISSIONS (ADDED 'community' to the check)
-        const hasFilters = searchId || minAge || maxAge || minHeight || maxHeight || minSalary || education || community || subCommunity || maritalStatus || occupation;
+        // 5. CHECK PERMISSIONS
+        const hasFilters = searchId || minAge || maxAge || minHeight || maxHeight || minSalary || education || community || subCommunity || maritalStatus || occupation || country || state || city || diet || motherTongue || star || pada;
 
         if (hasFilters && !isViewerPremium) {
             return res.status(403).json({ 
@@ -2825,7 +2825,7 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
             gender: targetGender,
             isApproved: true,
             isActive: true,
-            _id: { $ne: req.userId }, // Exclude self
+            _id: { $ne: req.userId }, 
             isPaidMember: true 
         };
 
@@ -2846,28 +2846,28 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
                     if (maxHeight) query.height.$lte = parseFloat(maxHeight);
                 }
                 if (minSalary) {
-                    query.annualIncome = { $gte: parseFloat(minSalary) };
+                    // Adjust this based on how you store salary (number vs string)
+                    query.annualIncome = { $regex: minSalary, $options: 'i' }; 
                 }
                 if (education) query.highestQualification = education;
                 if (maritalStatus) query.maritalStatus = maritalStatus;
-                
-                // --- ADDED COMMUNITY FILTER HERE ---
-                if (community) {
-                    query.community = community; 
-                }
+                if (community) query.community = community; 
+                if (subCommunity) query.$or = [{ caste: subCommunity }, { subCommunity: subCommunity }];
+                if (occupation) query.jobRole = { $regex: occupation, $options: 'i' };
 
-                if (subCommunity) {
-                    query.$or = [{ caste: subCommunity }, { subCommunity: subCommunity }];
-                }
-                if (occupation) {
-                    query.jobRole = { $regex: occupation, $options: 'i' };
-                }
+                // --- NEW FILTERS ADDED TO DB QUERY ---
+                if (country) query.country = country;
+                if (state) query.state = state;
+                if (city) query.city = city;
+                if (diet) query.diet = diet;
+                if (motherTongue) query['astrologyDetails.motherTongue'] = motherTongue;
+                if (star) query['astrologyDetails.star'] = star;
+                if (pada) query['astrologyDetails.pada'] = pada;
             }
         }
 
         // 8. Execute Query
         let profilesQuery = User.find(query)
-            // Added 'community' and 'caste' to the select list here
             .select('firstName lastName dob highestQualification community caste subCommunity city state maritalStatus jobRole uniqueId photos height annualIncome')
             .sort({ createdAt: -1 });
 
@@ -2879,7 +2879,7 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
         const profiles = await profilesQuery;
         const totalMatches = await User.countDocuments(query);
 
-        // 9. Format Data & ATTACH STATUS FROM MAP
+        // 9. Format Data
         const formattedData = profiles.map(p => {
             let age = "N/A";
             if (p.dob) {
@@ -2897,11 +2897,8 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
                 age: age,
                 occupation: p.jobRole || "Not Specified",
                 education: p.highestQualification || "Not Specified",
-
-                // NEW: Send both community and subCommunity separately
                 community: p.community || p.caste || "Not Specified",
                 subCommunity: p.subCommunity || "Not Specified",
-
                 location: `${p.city}, ${p.state}`,
                 status: p.maritalStatus,
                 height: p.height,
@@ -2924,7 +2921,8 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-                                                          
+  
+                                                                          
 
 
 // ====================================================================
