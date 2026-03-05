@@ -645,100 +645,101 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-
-// 1. Add this utility function right above your helper
+// 1. Utility function to prevent regex crashes
 const escapeRegExp = (string) => {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
 
-// 2. The upgraded helper function
+// 2. The upgraded, concurrent helper function
 const checkAndStageNewMasterData = async (userId, data) => {
-    try {
-        // Now checking EVERY dynamic field
-        const standardCategories = [
-            { category: 'Country', value: data.country },
-            { category: 'State', value: data.state },
-            { category: 'City', value: data.city },
-            { category: 'Education', value: data.highestQualification },
-            { category: 'Designation', value: data.jobRole },
-            { category: 'Income', value: data.annualIncome },
-            { category: 'Gothra', value: data.gothra }, 
-            { category: 'Diet', value: data.diet },
-            { category: 'MaritalStatus', value: data.maritalStatus },
-            { category: 'Sector', value: data.workType },
-            { category: 'CollegeName', value: data.collegeName },
-            { category: 'CompanyName', value: data.companyName },
-            { category: 'Height', value: data.rawHeight } // Remember to pass rawHeight from frontend!
-        ];
+    const checkPromises = [];
 
-        for (const item of standardCategories) {
-            // Prevent FormData stringified nulls/undefined/empty strings
-            if (!item.value || item.value === 'null' || item.value === 'undefined' || item.value.trim() === '') {
-                continue;
-            }
+    // --- 1. STANDARD CATEGORIES ---
+    const standardCategories = [
+        { category: 'Country', value: data.country },
+        { category: 'State', value: data.state },
+        { category: 'City', value: data.city },
+        { category: 'Education', value: data.highestQualification },
+        { category: 'Designation', value: data.jobRole },
+        { category: 'Income', value: data.annualIncome },
+        { category: 'Gothra', value: data.gothra }, 
+        { category: 'Diet', value: data.diet },
+        { category: 'MaritalStatus', value: data.maritalStatus },
+        { category: 'Sector', value: data.workType },
+        { category: 'CollegeName', value: data.collegeName },
+        { category: 'CompanyName', value: data.companyName },
+        { category: 'Height', value: data.rawHeight } 
+    ];
 
-            const val = item.value.trim();
-            const safeRegex = escapeRegExp(val); // STOPS CRASHES!
-
-            // Check if it exists in MasterData (case-insensitive)
-            const exists = await MasterData.findOne({ 
-                category: item.category, 
-                name: new RegExp(`^${safeRegex}$`, 'i') 
-            });
-
-            if (!exists) {
-                // If it doesn't exist, push to pending queue (upsert prevents duplicates)
-                await PendingMasterData.updateOne(
-                    { category: item.category, value: val },
-                    { $setOnInsert: { status: 'Pending', submittedBy: userId } },
-                    { upsert: true }
-                );
-            }
+    for (const item of standardCategories) {
+        if (!item.value || item.value === 'null' || item.value === 'undefined' || item.value.trim() === '') {
+            continue;
         }
 
-        // 3. Specialized Community / SubCommunity Logic
-        if (data.community && data.community !== 'null' && data.community !== 'undefined' && data.community.trim() !== '') {
-            const commVal = data.community.trim();
-            const safeCommRegex = escapeRegExp(commVal);
+        const val = item.value.trim();
+        const safeRegex = escapeRegExp(val);
 
-            const commExists = await Community.findOne({ 
-                name: new RegExp(`^${safeCommRegex}$`, 'i') 
-            });
-
-            if (!commExists) {
-                // Community doesn't exist
-                await PendingMasterData.updateOne(
-                    { category: 'Community', value: commVal },
-                    { $setOnInsert: { status: 'Pending', submittedBy: userId } },
-                    { upsert: true }
-                );
-            }
-
-            // Check SubCommunity
-            if (data.subCommunity && data.subCommunity !== 'null' && data.subCommunity !== 'undefined' && data.subCommunity.trim() !== '') {
-                const subVal = data.subCommunity.trim();
-                let subExists = false;
-                
-                if (commExists && commExists.subCommunities) {
-                    subExists = commExists.subCommunities.some(
-                        sub => sub.toLowerCase() === subVal.toLowerCase()
-                    );
-                }
-
-                if (!subExists) {
-                    // SubCommunity doesn't exist under this Community
+        // Push each database operation into an array as an independent Promise
+        const promise = MasterData.findOne({ category: item.category, name: new RegExp(`^${safeRegex}$`, 'i') })
+            .then(async (exists) => {
+                if (!exists) {
                     await PendingMasterData.updateOne(
-                        { category: 'SubCommunity', value: subVal, parentValue: commVal },
+                        { category: item.category, value: val },
                         { $setOnInsert: { status: 'Pending', submittedBy: userId } },
                         { upsert: true }
                     );
                 }
-            }
-        }
-    } catch (err) {
-        console.error("Error staging new master data:", err);
+            })
+            // If ONE field fails, it logs it, but DOES NOT crash the other fields
+            .catch(err => console.error(`Failed to stage ${item.category}:`, err.message));
+
+        checkPromises.push(promise);
     }
+
+    // --- 2. COMMUNITY / SUB-COMMUNITY ---
+    if (data.community && data.community !== 'null' && data.community !== 'undefined' && data.community.trim() !== '') {
+        const commVal = data.community.trim();
+        const safeCommRegex = escapeRegExp(commVal);
+
+        const commPromise = Community.findOne({ name: new RegExp(`^${safeCommRegex}$`, 'i') })
+            .then(async (commExists) => {
+                // A. Check Community
+                if (!commExists) {
+                    await PendingMasterData.updateOne(
+                        { category: 'Community', value: commVal },
+                        { $setOnInsert: { status: 'Pending', submittedBy: userId } },
+                        { upsert: true }
+                    );
+                }
+
+                // B. Check SubCommunity (Only runs if Community check doesn't crash)
+                if (data.subCommunity && data.subCommunity !== 'null' && data.subCommunity !== 'undefined' && data.subCommunity.trim() !== '') {
+                    const subVal = data.subCommunity.trim();
+                    let subExists = false;
+                    
+                    if (commExists && commExists.subCommunities) {
+                        subExists = commExists.subCommunities.some(sub => sub.toLowerCase() === subVal.toLowerCase());
+                    }
+
+                    if (!subExists) {
+                        await PendingMasterData.updateOne(
+                            { category: 'SubCommunity', value: subVal, parentValue: commVal },
+                            { $setOnInsert: { status: 'Pending', submittedBy: userId } },
+                            { upsert: true }
+                        );
+                    }
+                }
+            })
+            .catch(err => console.error(`Failed to stage Community data:`, err.message));
+
+        checkPromises.push(commPromise);
+    }
+
+    // --- 3. EXECUTE ALL AT ONCE ---
+    // Promise.allSettled ensures that even if one promise rejects, all the others still finish
+    await Promise.allSettled(checkPromises);
 };
+
 
 
 // 3. REGISTER ROUTE (Updated to await the master data check)
