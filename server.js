@@ -650,25 +650,18 @@ const escapeRegExp = (string) => {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
 
-// 2. The upgraded, concurrent helper function
+// 2. The targeted, concurrent helper function
 const checkAndStageNewMasterData = async (userId, data) => {
     const checkPromises = [];
 
-    // --- 1. STANDARD CATEGORIES ---
+    // --- 1. ONLY THE EXACT CATEGORIES YOU REQUESTED ---
     const standardCategories = [
         { category: 'Country', value: data.country },
         { category: 'State', value: data.state },
         { category: 'City', value: data.city },
         { category: 'Education', value: data.highestQualification },
         { category: 'Designation', value: data.jobRole },
-        { category: 'Income', value: data.annualIncome },
-        { category: 'Gothra', value: data.gothra }, 
-        { category: 'Diet', value: data.diet },
-        { category: 'MaritalStatus', value: data.maritalStatus },
-        { category: 'Sector', value: data.workType },
-        { category: 'CollegeName', value: data.collegeName },
-        { category: 'CompanyName', value: data.companyName },
-        { category: 'Height', value: data.rawHeight } 
+        { category: 'Gothra', value: data.gothra }
     ];
 
     for (const item of standardCategories) {
@@ -679,7 +672,7 @@ const checkAndStageNewMasterData = async (userId, data) => {
         const val = item.value.trim();
         const safeRegex = escapeRegExp(val);
 
-        // Push each database operation into an array as an independent Promise
+        // Process each field concurrently
         const promise = MasterData.findOne({ category: item.category, name: new RegExp(`^${safeRegex}$`, 'i') })
             .then(async (exists) => {
                 if (!exists) {
@@ -690,20 +683,19 @@ const checkAndStageNewMasterData = async (userId, data) => {
                     );
                 }
             })
-            // If ONE field fails, it logs it, but DOES NOT crash the other fields
             .catch(err => console.error(`Failed to stage ${item.category}:`, err.message));
 
         checkPromises.push(promise);
     }
 
-    // --- 2. COMMUNITY / SUB-COMMUNITY ---
+    // --- 2. COMMUNITY & SUB-COMMUNITY ---
     if (data.community && data.community !== 'null' && data.community !== 'undefined' && data.community.trim() !== '') {
         const commVal = data.community.trim();
         const safeCommRegex = escapeRegExp(commVal);
 
         const commPromise = Community.findOne({ name: new RegExp(`^${safeCommRegex}$`, 'i') })
             .then(async (commExists) => {
-                // A. Check Community
+                // Check Community
                 if (!commExists) {
                     await PendingMasterData.updateOne(
                         { category: 'Community', value: commVal },
@@ -712,7 +704,7 @@ const checkAndStageNewMasterData = async (userId, data) => {
                     );
                 }
 
-                // B. Check SubCommunity (Only runs if Community check doesn't crash)
+                // Check SubCommunity
                 if (data.subCommunity && data.subCommunity !== 'null' && data.subCommunity !== 'undefined' && data.subCommunity.trim() !== '') {
                     const subVal = data.subCommunity.trim();
                     let subExists = false;
@@ -736,9 +728,9 @@ const checkAndStageNewMasterData = async (userId, data) => {
     }
 
     // --- 3. EXECUTE ALL AT ONCE ---
-    // Promise.allSettled ensures that even if one promise rejects, all the others still finish
     await Promise.allSettled(checkPromises);
 };
+
 
 
 
