@@ -2543,7 +2543,8 @@ app.get("/api/agent/users", verifyAgent, async (req, res) => {
     }
 });
 
-// 3. Register a User (Manual Entry by Agent) - *** FIXED ENUM & FIELDS ***
+
+            // 3. Register a User (Manual Entry by Agent) - WITH PENDING MASTER DATA LOGIC
 app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
     try {
         const data = req.body; 
@@ -2563,72 +2564,135 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
         }
 
         // 2. Prepare Data
-        const uniqueId = await generateUserId(data.state); // Generates ID based on State
+        const uniqueId = await generateUserId(data.state); 
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
 
-        // 3. Create User Object (Mapping ALL fields explicitly to ensure safety)
+        // 3. Create User Object 
         const user = new User({
-            // --- Basic Fields ---
             profileFor: data.profileFor,
             gender: data.gender,
             firstName: data.firstName,
             lastName: data.lastName,
             dob: data.dob,
-
-            // --- Religion & Community ---
             religion: data.religion,
-            community: data.community, // React frontend sends 'caste' as 'community'
-            caste: data.caste,         // Optional sub-caste
+            community: data.community, 
+            caste: data.caste,         
             subCommunity: data.subCommunity,
-
-            // --- Location ---
             country: data.country,
             state: data.state,
             city: data.city,
-
-            // --- Personal ---
             maritalStatus: data.maritalStatus,
-            height: data.height, // Ensure this is a number in frontend
+            height: data.height, 
             diet: data.diet,
-
-            // --- Education & Work (Previously Missing) ---
             highestQualification: data.highestQualification,
             collegeName: data.collegeName,
-            workType: data.workType, // 'Private', 'Govt', etc.
+            workType: data.workType, 
             jobRole: data.jobRole,
             companyName: data.companyName,
             annualIncome: data.annualIncome,
-
-            // --- Contact & Auth ---
             email: data.email,
             mobileNumber: data.mobileNumber,
             password: hashedPassword,
-
-            // --- System Fields ---
             uniqueId: uniqueId,
-            isActive: true, // Agent created profiles are active by default (but might need approval)
-            isApproved: false, // Still needs Admin Approval
+            isActive: true, 
+            isApproved: false, 
             isPaidMember: false,
-            
             gothra: data.gothra,
-             residentsIn: data.residentsIn,
-            // --- REFERRAL LINKING (FIXED ENUM) ---
+            residentsIn: data.residentsIn,
             referredByAgentId: agent._id,
             referredByAgentName: agent.name,
-            referralType: 'manual' // FIXED: Was 'manual_entry', causing the error
+            referralType: 'manual' 
         });
 
         // 4. Save to DB
         await user.save();
 
-        // 5. PREPARE EMAILS
-        // A. Welcome Email to User
+        // ---------------------------------------------------------
+        // --- NEW: Staging Logic for Custom Agent Input Data ---
+        // ---------------------------------------------------------
+        const checkAndStageAgentMasterData = async () => {
+            try {
+                const fieldsToCheck = [
+                    { category: 'Country', value: data.country },
+                    { category: 'State', value: data.state },
+                    { category: 'City', value: data.city },
+                    { category: 'Education', value: data.highestQualification },
+                    { category: 'Designation', value: data.jobRole },
+                    { category: 'Income', value: data.annualIncome },
+                    { category: 'MaritalStatus', value: data.maritalStatus },
+                    { category: 'Diet', value: data.diet },
+                    { category: 'Sector', value: data.workType }
+                ];
+
+                // 1. Check Standard Fields
+                for (const item of fieldsToCheck) {
+                    if (!item.value || typeof item.value !== 'string') continue;
+                    const val = item.value.trim();
+                    if (!val) continue;
+
+                    const exists = await MasterData.findOne({ 
+                        category: item.category, 
+                        name: new RegExp(`^${val}$`, 'i') 
+                    });
+
+                    if (!exists) {
+                        await PendingMasterData.updateOne(
+                            { category: item.category, value: val },
+                            { $setOnInsert: { status: 'Pending', submittedBy: user._id } }, // tied to the created user
+                            { upsert: true }
+                        );
+                    }
+                }
+
+                // 2. Check Community / SubCommunity
+                if (data.community) {
+                    const commVal = data.community.trim();
+                    const commExists = await Community.findOne({ 
+                        name: new RegExp(`^${commVal}$`, 'i') 
+                    });
+
+                    if (!commExists) {
+                        await PendingMasterData.updateOne(
+                            { category: 'Community', value: commVal },
+                            { $setOnInsert: { status: 'Pending', submittedBy: user._id } },
+                            { upsert: true }
+                        );
+                    }
+
+                    if (data.caste) {
+                        const subVal = data.caste.trim();
+                        let subExists = false;
+                        if (commExists && commExists.subCommunities) {
+                            subExists = commExists.subCommunities.some(
+                                sub => sub.toLowerCase() === subVal.toLowerCase()
+                            );
+                        }
+
+                        if (!subExists) {
+                            await PendingMasterData.updateOne(
+                                { category: 'SubCommunity', value: subVal, parentValue: commVal },
+                                { $setOnInsert: { status: 'Pending', submittedBy: user._id } },
+                                { upsert: true }
+                            );
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Error staging new master data from Agent:", err);
+            }
+        };
+
+        // Run the background check
+        checkAndStageAgentMasterData().catch(console.error);
+
+        // 5. PREPARE & SEND EMAILS
         const userWelcomeContent = generateEmailTemplate(
             "Welcome to KalyanaShobha",
             `<p>Dear ${user.firstName},</p>
              <p>Your profile has been created by our agent <strong>${agent.name}</strong>.</p>
              <p><strong>Profile ID:</strong> ${user.uniqueId}</p>
+ <p><strong>Gmail :</strong> ${user.email}</p>
              <p><strong>Login Password:</strong> ${data.password}</p>
              <p>Please login to your dashboard to view matches.</p>`
         );
@@ -2638,7 +2702,6 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
             html: userWelcomeContent 
         });
 
-        // B. Confirmation Email to Agent (NEW)
         const agentNotificationContent = generateEmailTemplate(
             "New User Registered Successfully",
             `<p>Dear ${agent.name},</p>
@@ -2656,23 +2719,21 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
             html: agentNotificationContent 
         });
 
-        // 6. SEND EMAILS (Parallel & Awaited)
         try {
             await Promise.all([sendUserMail, sendAgentMail]);
             console.log("Agent manual registration emails sent successfully.");
         } catch (emailError) {
             console.error("Email Sending Failed:", emailError);
-            // We don't throw here so the agent still gets the success response even if email fails
         }
 
         res.json({ success: true, message: "User registered successfully under your referral." });
 
     } catch (e) {
         console.error("Agent Reg Error:", e);
-        // Return the specific error message (like Validation failed)
         res.status(500).json({ success: false, message: e.message });
     }
 });
+
 
 
 
