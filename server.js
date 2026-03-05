@@ -3661,10 +3661,6 @@ app.post("/api/admin/master-data", verifyAdmin, async (req, res) => {
     }
 });
 
-// 1. Utility function (If you already added this at the top of your file for the register route, you don't need to paste it twice)
-const escapeRegExp = (string) => {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-};
 
 // 2. The concurrent helper for Extra Details
 const checkAndStageExtraMasterData = async (userId, astrologyDetails) => {
