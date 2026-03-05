@@ -3661,7 +3661,55 @@ app.post("/api/admin/master-data", verifyAdmin, async (req, res) => {
     }
 });
 
-// POST: Add or Update Astrology & Family details
+// 1. Utility function (If you already added this at the top of your file for the register route, you don't need to paste it twice)
+const escapeRegExp = (string) => {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
+// 2. The concurrent helper for Extra Details
+const checkAndStageExtraMasterData = async (userId, astrologyDetails) => {
+    if (!astrologyDetails) return;
+
+    const checkPromises = [];
+    const fieldsToCheck = [
+        { category: 'Moonsign', value: astrologyDetails.moonsign },
+        { category: 'Star', value: astrologyDetails.star },
+        { category: 'Pada', value: astrologyDetails.pada }, 
+        { category: 'MotherTongue', value: astrologyDetails.motherTongue },
+        { category: 'Complexion', value: astrologyDetails.complexion }
+    ];
+
+    for (const item of fieldsToCheck) {
+        // Prevent stringified nulls, undefined, and empty spaces
+        if (!item.value || item.value === 'null' || item.value === 'undefined' || item.value.trim() === '') {
+            continue;
+        }
+
+        const val = item.value.trim();
+        const safeRegex = escapeRegExp(val); // STOPS CRASHES!
+
+        // Process each field concurrently
+        const promise = MasterData.findOne({ category: item.category, name: new RegExp(`^${safeRegex}$`, 'i') })
+            .then(async (exists) => {
+                if (!exists) {
+                    await PendingMasterData.updateOne(
+                        { category: item.category, value: val }, 
+                        { $setOnInsert: { status: 'Pending', submittedBy: userId } },
+                        { upsert: true }
+                    );
+                }
+            })
+            .catch(err => console.error(`Failed to stage extra detail ${item.category}:`, err.message));
+
+        checkPromises.push(promise);
+    }
+
+    // Execute all checks at once so Vercel doesn't time out
+    await Promise.allSettled(checkPromises);
+};
+
+
+// 3. POST: Add or Update Astrology & Family details
 app.post("/api/user/extra-details", async (req, res) => {
     try {
         const { 
@@ -3691,44 +3739,9 @@ app.post("/api/user/extra-details", async (req, res) => {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        // --- STAGING LOGIC: Push custom data to Admin ---
-        const stageNewExtraDetailsData = async () => {
-            try {
-                // Added Pada here so it gets verified too
-                const fieldsToCheck = [
-                    { category: 'Moonsign', value: astrologyDetails.moonsign },
-                    { category: 'Star', value: astrologyDetails.star },
-                    { category: 'Pada', value: astrologyDetails.pada }, 
-                    { category: 'MotherTongue', value: astrologyDetails.motherTongue },
-                    { category: 'Complexion', value: astrologyDetails.complexion }
-                ];
-
-                for (const item of fieldsToCheck) {
-                    if (!item.value || typeof item.value !== 'string') continue;
-
-                    // Clean string to prevent silent DB match failures
-                    const val = item.value.trim();
-                    if (!val) continue;
-
-                    const exists = await MasterData.findOne({ 
-                        category: item.category, 
-                        name: new RegExp(`^${val}$`, 'i') 
-                    });
-
-                    if (!exists) {
-                        await PendingMasterData.updateOne(
-                            { category: item.category, value: val }, 
-                            { $setOnInsert: { status: 'Pending', submittedBy: userId } },
-                            { upsert: true }
-                        );
-                    }
-                }
-            } catch (err) {
-                console.error("Error staging extra details master data:", err);
-            }
-        };
-
-        stageNewExtraDetailsData().catch(console.error);
+        // --- STAGING LOGIC: VERCEL FIX ---
+        // We MUST use 'await' here so the server finishes pushing to PendingMasterData before sending the response
+        await checkAndStageExtraMasterData(userId, astrologyDetails);
 
         res.json({ 
             success: true, 
@@ -3741,7 +3754,7 @@ app.post("/api/user/extra-details", async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 });
-                        
+                
 
 
 // GET: Fetch Astrology & Family details
