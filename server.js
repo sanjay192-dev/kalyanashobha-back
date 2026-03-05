@@ -646,67 +646,89 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
 });
 
 
+// 1. Add this utility function right above your helper
+const escapeRegExp = (string) => {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
 
-// Add this helper function above your register route
+// 2. The upgraded helper function
 const checkAndStageNewMasterData = async (userId, data) => {
     try {
-        // 1. Standard MasterData fields to check
+        // Now checking EVERY dynamic field
         const standardCategories = [
             { category: 'Country', value: data.country },
             { category: 'State', value: data.state },
             { category: 'City', value: data.city },
             { category: 'Education', value: data.highestQualification },
             { category: 'Designation', value: data.jobRole },
-            { category: 'Income', value: data.annualIncome }
+            { category: 'Income', value: data.annualIncome },
+            { category: 'Gothra', value: data.gothra }, 
+            { category: 'Diet', value: data.diet },
+            { category: 'MaritalStatus', value: data.maritalStatus },
+            { category: 'Sector', value: data.workType },
+            { category: 'CollegeName', value: data.collegeName },
+            { category: 'CompanyName', value: data.companyName },
+            { category: 'Height', value: data.rawHeight } // Remember to pass rawHeight from frontend!
         ];
 
         for (const item of standardCategories) {
-            if (!item.value) continue;
-            
+            // Prevent FormData stringified nulls/undefined/empty strings
+            if (!item.value || item.value === 'null' || item.value === 'undefined' || item.value.trim() === '') {
+                continue;
+            }
+
+            const val = item.value.trim();
+            const safeRegex = escapeRegExp(val); // STOPS CRASHES!
+
             // Check if it exists in MasterData (case-insensitive)
             const exists = await MasterData.findOne({ 
                 category: item.category, 
-                name: new RegExp(`^${item.value}$`, 'i') 
+                name: new RegExp(`^${safeRegex}$`, 'i') 
             });
 
             if (!exists) {
                 // If it doesn't exist, push to pending queue (upsert prevents duplicates)
                 await PendingMasterData.updateOne(
-                    { category: item.category, value: item.value },
+                    { category: item.category, value: val },
                     { $setOnInsert: { status: 'Pending', submittedBy: userId } },
                     { upsert: true }
                 );
             }
         }
 
-        // 2. Specialized Community / SubCommunity Logic
-        if (data.community) {
+        // 3. Specialized Community / SubCommunity Logic
+        if (data.community && data.community !== 'null' && data.community !== 'undefined' && data.community.trim() !== '') {
+            const commVal = data.community.trim();
+            const safeCommRegex = escapeRegExp(commVal);
+
             const commExists = await Community.findOne({ 
-                name: new RegExp(`^${data.community}$`, 'i') 
+                name: new RegExp(`^${safeCommRegex}$`, 'i') 
             });
 
             if (!commExists) {
                 // Community doesn't exist
                 await PendingMasterData.updateOne(
-                    { category: 'Community', value: data.community },
+                    { category: 'Community', value: commVal },
                     { $setOnInsert: { status: 'Pending', submittedBy: userId } },
                     { upsert: true }
                 );
             }
 
             // Check SubCommunity
-            if (data.subCommunity) {
+            if (data.subCommunity && data.subCommunity !== 'null' && data.subCommunity !== 'undefined' && data.subCommunity.trim() !== '') {
+                const subVal = data.subCommunity.trim();
                 let subExists = false;
+                
                 if (commExists && commExists.subCommunities) {
                     subExists = commExists.subCommunities.some(
-                        sub => sub.toLowerCase() === data.subCommunity.toLowerCase()
+                        sub => sub.toLowerCase() === subVal.toLowerCase()
                     );
                 }
 
                 if (!subExists) {
                     // SubCommunity doesn't exist under this Community
                     await PendingMasterData.updateOne(
-                        { category: 'SubCommunity', value: data.subCommunity, parentValue: data.community },
+                        { category: 'SubCommunity', value: subVal, parentValue: commVal },
                         { $setOnInsert: { status: 'Pending', submittedBy: userId } },
                         { upsert: true }
                     );
@@ -719,14 +741,13 @@ const checkAndStageNewMasterData = async (userId, data) => {
 };
 
 
-// 1. REGISTER (Updated to use Multer for Multipart Upload)
+// 3. REGISTER ROUTE (Updated to await the master data check)
 
 app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async (req, res) => {
     try {
         const data = req.body;
 
         // --- STEP 1: VALIDATION ---
-        // 1. Check for Digital Signature File
         if (!req.file) {
             return res.status(400).json({ 
                 success: false, 
@@ -735,12 +756,10 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
         }
         const signatureUrl = req.file.path; 
 
-        // 2. Check Password
         if (!data.password) {
             return res.status(400).json({ success: false, message: "Password is required" });
         }
 
-        // 3. Check if user exists
         const existingUser = await User.findOne({ email: data.email });
         if (existingUser) {
             return res.status(400).json({ success: false, message: "User already exists" });
@@ -760,9 +779,7 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
             uniqueId, 
             photos: [],
             isEmailVerified: false, 
-            isActive: true, // Auto-active for now, or false if you want admin approval first
-
-            // --- LEGAL & SECURITY FIELDS ---
+            isActive: true, 
             digitalSignature: signatureUrl, 
             termsAcceptedAt: new Date(),
             termsAcceptedIP: clientIp
@@ -770,14 +787,11 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
 
         // --- STEP 3: SAVE TO DB ---
         await user.save();
-        
 
-        // --- NEW: Check for unverified dropdown data (runs in background) ---
-        checkAndStageNewMasterData(user._id, data).catch(console.error);
-        
-        // --- STEP 4: PREPARE EMAILS (Your Custom Templates) ---
+        // --- NEW: VERCEL FIX - Added 'await' so the server doesn't kill the process early ---
+        await checkAndStageNewMasterData(user._id, data);
 
-        // A. Welcome Email Content
+        // --- STEP 4: PREPARE EMAILS ---
         const userWelcomeContent = generateEmailTemplate(
             "Welcome to KalyanaShobha!",
             `<p>Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
@@ -789,7 +803,6 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
              </div>`
         );
 
-        // B. Admin Alert Content (Table Format)
         const adminAlertContent = generateEmailTemplate(
             "New User Registration",
             `<p>A new user has just registered on the platform.</p>
@@ -820,13 +833,11 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
                 </tr>
              </table>
              <div style="margin-top: 20px; text-align: center;">
-                <a href="https://kalyanashobha-admin.vercel.app" style="background-color: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-size: 14px;">Go to Admin Dashboard</a>
+                <a href="https://kalyanashobha.in/admin" style="background-color: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-size: 14px;">Go to Admin Dashboard</a>
              </div>`
         );
 
-        // --- STEP 5: SEND EMAILS (Parallel & Awaited for Vercel) ---
-
-        // 1. Prepare Base Promises
+        // --- STEP 5: SEND EMAILS ---
         const sendUserMail = sendMail({ 
             to: user.email, 
             subject: "Welcome to KalyanaShobha Matrimony", 
@@ -834,17 +845,15 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
         });
 
         const sendAdminMail = sendMail({ 
-            to: EMAIL_USER, // Sends to your admin email
+            to: EMAIL_USER, 
             subject: `New User: ${user.uniqueId} (${user.firstName})`, 
             html: adminAlertContent 
         });
 
         const emailPromises = [sendUserMail, sendAdminMail];
 
-        // 2. NEW LOGIC: Check for Agent Referral & Add to Promises
         if (data.referredByAgentId) {
             try {
-                // Fetch the agent details from DB
                 const agent = await Agent.findById(data.referredByAgentId);
                 if (agent) {
                     const agentAlertContent = generateEmailTemplate(
@@ -858,13 +867,13 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
                             <a href="https://kalyanashobha-agent.vercel.app" style="background-color: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-size: 14px;">Go to Agent Dashboard</a>
                          </div>`
                     );
-                    
+
                     const sendAgentMail = sendMail({ 
                         to: agent.email, 
                         subject: `New Referral Joined: ${user.firstName}`, 
                         html: agentAlertContent 
                     });
-                    
+
                     emailPromises.push(sendAgentMail);
                 }
             } catch (agentErr) {
@@ -872,13 +881,11 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
             }
         }
 
-        // 3. Wait for all emails to complete
         try {
             await Promise.all(emailPromises);
             console.log("Registration emails sent successfully.");
         } catch (emailError) {
             console.error("Email Sending Failed:", emailError);
-            // We do not return an error response here, so the user flow isn't interrupted.
         }
 
         // --- STEP 6: RESPONSE ---
