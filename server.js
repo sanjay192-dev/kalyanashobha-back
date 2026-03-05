@@ -2543,6 +2543,9 @@ app.get("/api/agent/users", verifyAgent, async (req, res) => {
     }
 });
 
+
+                    
+            
 // 3. Register a User (Manual Entry by Agent) - Includes Pending Data Staging
 app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
     try {
@@ -2567,6 +2570,10 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(data.password, salt);
 
+        // Sanitize height & gothra just in case agent frontend sends empty strings
+        const safeHeight = (data.height && data.height !== '') ? Number(data.height) : undefined;
+        const safeGothra = data.gothra ? data.gothra.trim() : undefined;
+
         // 3. Create User Object 
         const user = new User({
             profileFor: data.profileFor,
@@ -2576,13 +2583,13 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
             dob: data.dob,
             religion: data.religion,
             community: data.community, 
-            caste: data.caste,         
+            caste: data.subCommunity || data.caste, // Sync subCommunity and caste
             subCommunity: data.subCommunity,
             country: data.country,
             state: data.state,
             city: data.city,
             maritalStatus: data.maritalStatus,
-            height: data.height, 
+            height: safeHeight, 
             diet: data.diet,
             highestQualification: data.highestQualification,
             collegeName: data.collegeName,
@@ -2597,7 +2604,7 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
             isActive: true, 
             isApproved: false, 
             isPaidMember: false,
-            gothra: data.gothra,
+            gothra: safeGothra,
             residentsIn: data.residentsIn,
             referredByAgentId: agent._id,
             referredByAgentName: agent.name,
@@ -2607,82 +2614,10 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
         // 4. Save to DB
         await user.save();
 
-        // --- NEW: Staging Logic for Custom Master Data Typed by Agent ---
-        // Runs in the background
-        const stageNewMasterDataFromAgent = async () => {
-            try {
-                // 1. Check Standard Categories
-                const fieldsToCheck = [
-                    { category: 'Country', value: data.country },
-                    { category: 'State', value: data.state },
-                    { category: 'City', value: data.city },
-                    { category: 'Education', value: data.highestQualification },
-                    { category: 'Designation', value: data.jobRole },
-                    { category: 'Income', value: data.annualIncome }
-                ];
-
-                for (const item of fieldsToCheck) {
-                    if (!item.value || typeof item.value !== 'string') continue;
-                    const val = item.value.trim();
-                    if (!val) continue;
-
-                    const exists = await MasterData.findOne({ 
-                        category: item.category, 
-                        name: new RegExp(`^${val}$`, 'i') 
-                    });
-
-                    if (!exists) {
-                        await PendingMasterData.updateOne(
-                            { category: item.category, value: val },
-                            { $setOnInsert: { status: 'Pending', submittedBy: user._id } },
-                            { upsert: true }
-                        );
-                    }
-                }
-
-                // 2. Check Community & SubCommunity
-                if (data.community && typeof data.community === 'string') {
-                    const commVal = data.community.trim();
-                    if (!commVal) return;
-
-                    const commExists = await Community.findOne({ 
-                        name: new RegExp(`^${commVal}$`, 'i') 
-                    });
-
-                    if (!commExists) {
-                        await PendingMasterData.updateOne(
-                            { category: 'Community', value: commVal },
-                            { $setOnInsert: { status: 'Pending', submittedBy: user._id } },
-                            { upsert: true }
-                        );
-                    }
-
-                    if (data.caste && typeof data.caste === 'string') {
-                        const casteVal = data.caste.trim();
-                        if (!casteVal) return;
-
-                        let subExists = false;
-                        if (commExists && commExists.subCommunities) {
-                            subExists = commExists.subCommunities.some(
-                                sub => sub.toLowerCase() === casteVal.toLowerCase()
-                            );
-                        }
-
-                        if (!subExists) {
-                            await PendingMasterData.updateOne(
-                                { category: 'SubCommunity', value: casteVal, parentValue: commVal },
-                                { $setOnInsert: { status: 'Pending', submittedBy: user._id } },
-                                { upsert: true }
-                            );
-                        }
-                    }
-                }
-            } catch (err) {
-                console.error("Error staging master data from Agent Registration:", err);
-            }
-        };
-
-        stageNewMasterDataFromAgent().catch(console.error);
+        // --- THE MAGIC FIX: Reuse the global helper and AWAIT it ---
+        // This perfectly checks the 8 fields (Community, SubCommunity, Country, State, City, Gothra, Designation, Education)
+        // using the concurrent, crash-proof Promise logic we already created!
+        await checkAndStageNewMasterData(user._id, data);
 
         // 5. PREPARE EMAILS
         const userWelcomeContent = generateEmailTemplate(
@@ -2694,12 +2629,7 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
              <p><strong>Login Password:</strong> ${data.password}</p>
              <p>Please login to your dashboard to view matches.</p>`
         );
-        const sendUserMail = sendMail({ 
-            to: user.email, 
-            subject: "Profile Created via Agent", 
-            html: userWelcomeContent 
-        });
-
+        
         const agentNotificationContent = generateEmailTemplate(
             "New User Registered Successfully",
             `<p>Dear ${agent.name},</p>
@@ -2708,15 +2638,13 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
              <p><strong>Profile ID:</strong> ${user.uniqueId}</p>
              <p>This user has been added to your referral list and you can track their status in your agent dashboard.</p>`
         );
-        const sendAgentMail = sendMail({ 
-            to: agent.email, 
-            subject: `Registration Successful: ${user.firstName}`, 
-            html: agentNotificationContent 
-        });
 
-        // 6. SEND EMAILS
+        // 6. SEND EMAILS (Parallel & Awaited)
         try {
-            await Promise.all([sendUserMail, sendAgentMail]);
+            await Promise.all([
+                sendMail({ to: user.email, subject: "Profile Created via Agent", html: userWelcomeContent }),
+                sendMail({ to: agent.email, subject: `Registration Successful: ${user.firstName}`, html: agentNotificationContent })
+            ]);
         } catch (emailError) {
             console.error("Email Sending Failed:", emailError);
         }
