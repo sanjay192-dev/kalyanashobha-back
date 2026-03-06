@@ -1451,6 +1451,10 @@ app.post("/api/admin/users/status", verifyAdmin, async (req, res) => {
 // NEW: SPECIFIC ADVANCED SEARCH API
 // ====================================================================
 
+// ====================================================================
+// NEW: SPECIFIC ADVANCED SEARCH API (Updated for Astrology)
+// ====================================================================
+
 app.post("/api/admin/users/search-advanced", verifyAdmin, async (req, res) => {
     try {
         const {
@@ -1461,7 +1465,7 @@ app.post("/api/admin/users/search-advanced", verifyAdmin, async (req, res) => {
             // Location
             country, state, city,
             // Community
-            religion, caste, subCommunity,
+            religion, community, caste, subCommunity, motherTongue, star,
             // Professional
             education, occupation
         } = req.body;
@@ -1473,27 +1477,35 @@ app.post("/api/admin/users/search-advanced", verifyAdmin, async (req, res) => {
         if (gender) query.gender = gender;
         if (maritalStatus) query.maritalStatus = maritalStatus;
         if (religion) query.religion = religion;
+        if (community) query.community = community;
+        
+        // Match both 'caste' and 'subCommunity' strings since they are often used interchangeably
         if (caste) query.caste = { $regex: caste, $options: 'i' };
         if (subCommunity) query.subCommunity = { $regex: subCommunity, $options: 'i' };
+        
         if (country) query.country = { $regex: country, $options: 'i' };
         if (state) query.state = { $regex: state, $options: 'i' };
         if (city) query.city = { $regex: city, $options: 'i' };
-        
-        // 2. Professional (Partial Matches)
+
+        // 2. Astrology Details (NEW)
+        if (motherTongue) query['astrologyDetails.motherTongue'] = { $regex: motherTongue, $options: 'i' };
+        if (star) query['astrologyDetails.star'] = { $regex: star, $options: 'i' };
+
+        // 3. Professional (Partial Matches)
         if (education) query.highestQualification = { $regex: education, $options: 'i' };
         if (occupation) query.jobRole = { $regex: occupation, $options: 'i' };
 
-        // 3. Age Calculation (Converting Age to Date of Birth range)
+        // 4. Age Calculation (Converting Age to Date of Birth range)
         if (minAge || maxAge) {
             const today = new Date();
             query.dob = {};
-            
+
             if (maxAge) {
                 // If max age is 30, birth date must be >= 30 years ago
                 const maxDate = new Date(new Date().setFullYear(today.getFullYear() - maxAge));
                 query.dob.$gte = maxDate; 
             }
-            
+
             if (minAge) {
                 // If min age is 20, birth date must be <= 20 years ago
                 const minDate = new Date(new Date().setFullYear(today.getFullYear() - minAge));
@@ -1502,7 +1514,7 @@ app.post("/api/admin/users/search-advanced", verifyAdmin, async (req, res) => {
         }
 
         const users = await User.find(query).select('-password');
-        
+
         res.json({ 
             success: true, 
             count: users.length, 
@@ -1514,7 +1526,7 @@ app.post("/api/admin/users/search-advanced", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-
+            
 
 
 
