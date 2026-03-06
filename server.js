@@ -137,7 +137,7 @@ const transporter = nodemailer.createTransport({
   port: 465,               // use 465 for secure SSL
   secure: true,            // true for port 465
   auth: {
-    user: "support@kalyanashobha.in",   // your domain email
+    user: "info@kalyanashobha.in",   // your domain email
     pass: "Ksm@2026"         // Hostinger email password
   }
 });
