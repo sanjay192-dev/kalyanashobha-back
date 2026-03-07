@@ -3937,8 +3937,9 @@ app.get("/api/pages/:pageName", async (req, res) => {
 // 1. ADMIN POST: Create a new Testimonial
 app.post("/api/admin/testimonials", verifyAdmin, uploadTestimonial.single("media"), async (req, res) => {
     try {
-        const { authorName, content } = req.body;
-        
+        // Look for 'videoUrl' in the request body
+        const { authorName, content, videoUrl } = req.body;
+
         if (!authorName || !content) {
             return res.status(400).json({ success: false, message: "Author name and content are required." });
         }
@@ -3946,14 +3947,15 @@ app.post("/api/admin/testimonials", verifyAdmin, uploadTestimonial.single("media
         let mediaUrl = null;
         let mediaType = 'none';
 
-        if (req.file) {
+        // 1st Priority: If admin pasted a Video URL
+        if (videoUrl && videoUrl.trim() !== '') {
+            mediaUrl = videoUrl.trim();
+            mediaType = 'video';
+        } 
+        // 2nd Priority: If admin uploaded an Image file
+        else if (req.file) {
             mediaUrl = req.file.path;
-            // Determine if it is a video or image based on the mimetype multer detects
-            if (req.file.mimetype && req.file.mimetype.startsWith('video/')) {
-                mediaType = 'video';
-            } else {
-                mediaType = 'image';
-            }
+            mediaType = 'image';
         }
 
         const testimonial = new Testimonial({
@@ -3992,15 +3994,15 @@ app.delete("/api/admin/testimonials/:id", verifyAdmin, async (req, res) => {
             return res.status(404).json({ success: false, message: "Testimonial not found" });
         }
 
-        // --- CLOUDINARY CLEANUP ---
-        if (testimonial.mediaUrl) {
+        // --- CLOUDINARY CLEANUP (ONLY FOR IMAGES NOW) ---
+        // If it's a video, it's just a URL string we pasted, so we don't need to ask Cloudinary to delete it here.
+        if (testimonial.mediaUrl && testimonial.mediaType === 'image') {
             const parts = testimonial.mediaUrl.split('/');
             const fileWithExt = parts.pop(); 
             const folder = parts.pop(); 
             const publicId = `${folder}/${fileWithExt.split('.')[0]}`; 
-            
-            // Cloudinary requires knowing if it's a video or image to delete it properly
-            await cloudinary.uploader.destroy(publicId, { resource_type: testimonial.mediaType });
+
+            await cloudinary.uploader.destroy(publicId, { resource_type: 'image' });
         }
 
         await Testimonial.findByIdAndDelete(req.params.id);
