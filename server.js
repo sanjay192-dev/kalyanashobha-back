@@ -12,6 +12,8 @@ const jwt = require('jsonwebtoken');
 const MasterData = require('./models/MasterData');
 const Otp = require('./models/Otp');
 const PendingMasterData = require('./models/PendingMasterData');
+const Testimonial = require('./models/Testimonial');
+
 // ---------------- MODELS ----------------
 const User = require('./models/User');
 const Agent = require('./models/Agent');
@@ -129,6 +131,17 @@ const issueStorage = new CloudinaryStorage({
     }
 });
 const uploadIssue = multer({ storage: issueStorage });
+// New Storage for Testimonials (Supports Images and Videos)
+const testimonialStorage = new CloudinaryStorage({
+    cloudinary,
+    params: {
+        folder: "matrimony_testimonials",
+        resource_type: "auto", // This is the magic word that allows both images AND videos!
+        allowed_formats: ["jpg", "jpeg", "png", "webp", "mp4", "mov", "avi"]
+    }
+});
+const uploadTestimonial = multer({ storage: testimonialStorage });
+
 const EMAIL_USER = "support@kalyanashobha.in";
 
 
@@ -3914,6 +3927,88 @@ app.get("/api/pages/:pageName", async (req, res) => {
     } catch (error) {
         console.error("Fetch Page Error:", error);
         res.status(500).json({ success: false, message: "Server Error fetching page content." });
+    }
+});
+
+// ====================================================================
+// TESTIMONIALS (Admin Management & Public View)
+// ====================================================================
+
+// 1. ADMIN POST: Create a new Testimonial
+app.post("/api/admin/testimonials", verifyAdmin, uploadTestimonial.single("media"), async (req, res) => {
+    try {
+        const { authorName, content } = req.body;
+        
+        if (!authorName || !content) {
+            return res.status(400).json({ success: false, message: "Author name and content are required." });
+        }
+
+        let mediaUrl = null;
+        let mediaType = 'none';
+
+        if (req.file) {
+            mediaUrl = req.file.path;
+            // Determine if it is a video or image based on the mimetype multer detects
+            if (req.file.mimetype && req.file.mimetype.startsWith('video/')) {
+                mediaType = 'video';
+            } else {
+                mediaType = 'image';
+            }
+        }
+
+        const testimonial = new Testimonial({
+            authorName,
+            content,
+            mediaType,
+            mediaUrl,
+            isApproved: true 
+        });
+
+        await testimonial.save();
+        res.json({ success: true, message: "Testimonial created successfully", testimonial });
+
+    } catch (error) {
+        console.error("Testimonial POST Error:", error);
+        res.status(500).json({ success: false, message: "Failed to create testimonial" });
+    }
+});
+
+// 2. PUBLIC GET: Fetch all approved Testimonials for the frontend
+app.get("/api/testimonials", async (req, res) => {
+    try {
+        const testimonials = await Testimonial.find({ isApproved: true }).sort({ createdAt: -1 });
+        res.json({ success: true, count: testimonials.length, data: testimonials });
+    } catch (error) {
+        console.error("Testimonial GET Error:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch testimonials" });
+    }
+});
+
+// 3. ADMIN DELETE: Remove a Testimonial and clean up Cloudinary
+app.delete("/api/admin/testimonials/:id", verifyAdmin, async (req, res) => {
+    try {
+        const testimonial = await Testimonial.findById(req.params.id);
+        if (!testimonial) {
+            return res.status(404).json({ success: false, message: "Testimonial not found" });
+        }
+
+        // --- CLOUDINARY CLEANUP ---
+        if (testimonial.mediaUrl) {
+            const parts = testimonial.mediaUrl.split('/');
+            const fileWithExt = parts.pop(); 
+            const folder = parts.pop(); 
+            const publicId = `${folder}/${fileWithExt.split('.')[0]}`; 
+            
+            // Cloudinary requires knowing if it's a video or image to delete it properly
+            await cloudinary.uploader.destroy(publicId, { resource_type: testimonial.mediaType });
+        }
+
+        await Testimonial.findByIdAndDelete(req.params.id);
+        res.json({ success: true, message: "Testimonial deleted successfully" });
+
+    } catch (error) {
+        console.error("Testimonial DELETE Error:", error);
+        res.status(500).json({ success: false, message: "Failed to delete testimonial" });
     }
 });
 
