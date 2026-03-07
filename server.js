@@ -22,6 +22,8 @@ const PaymentInterest = require('./models/PaymentInterest');
 const Admin = require('./models/Admin');
 const Community = require('./models/CommunityModel');
 
+const PageContent = require('./models/PageContent');
+
 const HelpIssue = require('./models/HelpIssue');
 const VendorLead = require('./models/VendorLead');
 
@@ -3846,6 +3848,74 @@ app.post("/api/admin/pending-data/action", verifyAdmin, async (req, res) => {
     }
 });
 
+// ====================================================================
+// DYNAMIC PAGE CONTENT (Terms, Refund, About)
+// ====================================================================
+
+// 1. ADMIN API: Update Page Content (Protected)
+app.post("/api/admin/pages", verifyAdmin, async (req, res) => {
+    try {
+        const { pageName, content } = req.body;
+
+        // Validate page name
+        const validPages = ['terms', 'refund', 'about'];
+        if (!validPages.includes(pageName)) {
+            return res.status(400).json({ success: false, message: "Invalid page name." });
+        }
+
+        if (!content) {
+            return res.status(400).json({ success: false, message: "Content cannot be empty." });
+        }
+
+        // Use findOneAndUpdate with upsert: true
+        // This will UPDATE the document if it exists, or CREATE it if it doesn't.
+        const updatedPage = await PageContent.findOneAndUpdate(
+            { pageName },
+            { 
+                content, 
+                lastUpdatedBy: req.adminId 
+            },
+            { new: true, upsert: true }
+        );
+
+        res.json({ 
+            success: true, 
+            message: `${pageName} updated successfully.`, 
+            data: updatedPage 
+        });
+
+    } catch (error) {
+        console.error("Page Update Error:", error);
+        res.status(500).json({ success: false, message: "Server Error updating page content." });
+    }
+});
+
+// 2. PUBLIC API: Get Page Content (Open to everyone)
+app.get("/api/pages/:pageName", async (req, res) => {
+    try {
+        const { pageName } = req.params;
+
+        const page = await PageContent.findOne({ pageName });
+
+        // If the admin hasn't set the content yet, return a graceful fallback
+        if (!page) {
+            return res.json({ 
+                success: true, 
+                content: "<p>Content is currently being updated. Please check back later.</p>" 
+            });
+        }
+
+        res.json({ 
+            success: true, 
+            content: page.content,
+            lastUpdated: page.updatedAt
+        });
+
+    } catch (error) {
+        console.error("Fetch Page Error:", error);
+        res.status(500).json({ success: false, message: "Server Error fetching page content." });
+    }
+});
 
 
 const PORT = process.env.PORT || 5000;
