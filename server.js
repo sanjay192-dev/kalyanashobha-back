@@ -3870,8 +3870,8 @@ app.post("/api/admin/pages", verifyAdmin, async (req, res) => {
     try {
         const { pageName, content } = req.body;
 
-        // Validate page name
-        const validPages = ['terms', 'refund', 'about'];
+        // UPDATE: Added 'faq' to the validPages array
+        const validPages = ['terms', 'refund', 'about', 'faq'];
         if (!validPages.includes(pageName)) {
             return res.status(400).json({ success: false, message: "Invalid page name." });
         }
