@@ -1039,39 +1039,84 @@ app.get("/api/user/my-profile", verifyUser, async (req, res) => {
     }
 });
 
-// 2. Update Profile Details
-app.put("/api/user/update-profile", verifyUser, async (req, res) => {
+
+// ====================================================================
+// USER PROFILE (View & Update with Photos)
+// ====================================================================
+
+// 2. Update Profile Details & Photos simultaneously
+app.put("/api/user/update-profile", verifyUser, uploadProfile.array("photos", 5), async (req, res) => {
     try {
         const { 
             firstName, lastName, religion, caste, subCommunity, 
             state, city, education, jobRole, annualIncome, 
             height, diet, maritalStatus, aboutMe,
-            // --- NEW FIELDS ---
-            gothra, residentsIn, astrologyDetails, familyDetails 
+            gothra, residentsIn, astrologyDetails, familyDetails,
+            existingPhotos // <-- Array of photo URLs the user wants to KEEP
         } = req.body;
 
+        // 1. Find User to get their current photos
+        const user = await User.findById(req.userId);
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        // 2. Handle Photos
+        let updatedPhotos = [];
+
+        // Parse existing photos sent from frontend (handles single string or array)
+        if (existingPhotos) {
+            updatedPhotos = Array.isArray(existingPhotos) ? existingPhotos : [existingPhotos];
+        }
+
+        // Identify which old photos are NO LONGER in the updatedPhotos list
+        const photosToDelete = user.photos.filter(photo => !updatedPhotos.includes(photo));
+
+        // Delete discarded photos from Cloudinary to save storage
+        if (photosToDelete.length > 0) {
+            const deletePromises = photosToDelete.map(imageUrl => {
+                const parts = imageUrl.split('/');
+                const fileWithExt = parts.pop();
+                const folder = parts.pop();
+                const publicId = `${folder}/${fileWithExt.split('.')[0]}`;
+                return cloudinary.uploader.destroy(publicId);
+            });
+            await Promise.all(deletePromises);
+        }
+
+        // Add newly uploaded photos from this request
+        if (req.files && req.files.length > 0) {
+            const newPhotoUrls = req.files.map(f => f.path);
+            updatedPhotos = [...updatedPhotos, ...newPhotoUrls];
+        }
+
+        // Ensure we don't exceed the 5 photo limit
+        if (updatedPhotos.length > 5) {
+            updatedPhotos = updatedPhotos.slice(0, 5);
+        }
+
+        // 3. Prepare Update Data
         const updateData = {
             firstName, lastName, religion, caste, subCommunity,
             state, city, highestQualification: education, jobRole, annualIncome,
             height, diet, maritalStatus, aboutMe,
-            // --- NEW FIELDS ---
             gothra, residentsIn, astrologyDetails, familyDetails,
-            hasAstrologyAndFamilyDetails: true // Flag as submitted once they update
+            photos: updatedPhotos, // <-- Save the merged photo array
+            hasAstrologyAndFamilyDetails: true 
         };
 
+        // 4. Update Database
         const updatedUser = await User.findByIdAndUpdate(
             req.userId, 
             { $set: updateData },
             { new: true } 
         ).select("-password");
 
-        res.json({ success: true, message: "Profile Updated", user: updatedUser });
+        res.json({ success: true, message: "Profile and Photos Updated", user: updatedUser });
+        
     } catch (e) {
         console.error("Profile Update Error:", e);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-
 
 
 
