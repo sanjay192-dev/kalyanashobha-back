@@ -4074,6 +4074,105 @@ app.delete("/api/admin/testimonials/:id", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: "Failed to delete testimonial" });
     }
 });
+// ====================================================================
+// AGENT FORGOT PASSWORD WORKFLOW
+// ====================================================================
+
+// 1. Agent Forgot Password (SEND OTP)
+app.post("/api/agent/auth/forgot-password", async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        // Ensure the email actually belongs to an active Agent
+        const agent = await Agent.findOne({ email, isActive: true });
+        if (!agent) {
+            return res.status(404).json({ success: false, message: "Agent email not found or account inactive" });
+        }
+
+        // Generate OTP & Save to MongoDB
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        await Otp.deleteMany({ email }); // Clear old OTPs
+        await Otp.create({ email, otp: otpCode });
+
+        const emailContent = generateEmailTemplate(
+            "Agent Password Reset OTP",
+            `<p>Hello ${agent.name},</p>
+             <p>Your OTP for resetting your Agent Dashboard password is:</p>
+             <h2 style="letter-spacing: 3px; color:#2c3e50;">${otpCode}</h2>
+             <p>This OTP is valid for <strong>5 minutes</strong>.</p>`
+        );
+
+        // Send Email using the noreply alias
+        await sendMail({ 
+            to: email, 
+            subject: "Agent Password Reset OTP", 
+            html: emailContent,
+            fromEmail: `"KalyanaShobha Security" <noreply@kalyanashobha.in>`
+        });
+
+        res.json({ success: true, message: "OTP sent to your registered agent email." });
+
+    } catch (err) {
+        console.error("Agent Forgot Password Error:", err);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// 2. Agent Verify OTP
+app.post("/api/agent/auth/verify-otp", async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+
+        const otpRecord = await Otp.findOne({ email, otp });
+
+        if (!otpRecord) {
+            return res.status(400).json({ success: false, message: "Invalid or Expired OTP" });
+        }
+
+        // OTP matched - update the record to mark it as verified
+        otpRecord.otp = "VERIFIED";
+        await otpRecord.save();
+
+        res.json({ success: true, message: "OTP verified successfully" });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// 3. Agent Reset Password
+app.post("/api/agent/auth/reset-password", async (req, res) => {
+    try {
+        const { email, newPassword } = req.body;
+
+        // Check if there is a VERIFIED record in the database
+        const verifiedRecord = await Otp.findOne({ email, otp: "VERIFIED" });
+        if (!verifiedRecord) {
+            return res.status(400).json({ success: false, message: "OTP not verified or session expired" });
+        }
+
+        const agent = await Agent.findOne({ email });
+        if (!agent) {
+            return res.status(404).json({ success: false, message: "Agent not found" });
+        }
+
+        // Hash the new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        // Update the agent's password and save
+        agent.password = hashedPassword;
+        await agent.save();
+
+        // Delete the used OTP record
+        await Otp.deleteOne({ _id: verifiedRecord._id });
+
+        res.json({ success: true, message: "Agent password reset successful!" });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+         
 
 
 const PORT = process.env.PORT || 5000;
