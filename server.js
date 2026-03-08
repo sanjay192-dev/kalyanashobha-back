@@ -925,6 +925,7 @@ app.post("/api/auth/register", uploadSignature.single('digitalSignature'), async
                         
 
 // ======================== FORGOT PASSWORD (SEND OTP) =========================
+// ======================== FORGOT PASSWORD (SEND OTP) =========================
 app.post("/api/auth/forgot-password", async (req, res) => {
     try {
         const { email } = req.body;
@@ -939,7 +940,8 @@ app.post("/api/auth/forgot-password", async (req, res) => {
         await Otp.deleteMany({ email });
         await Otp.create({ email, otp: otpCode });
 
-        const htmlTemplate = generateEmailTemplate(
+        // FIXED: Changed variable name to emailContent so it matches below
+        const emailContent = generateEmailTemplate(
             "Password Reset OTP",
             `<p>Your OTP for resetting password is:</p>
              <h2 style="letter-spacing: 3px; color:#2c3e50;">${otpCode}</h2>
@@ -947,19 +949,20 @@ app.post("/api/auth/forgot-password", async (req, res) => {
         );
 
         await sendMail({ 
-    to: email, 
-    subject: "Your Login OTP", 
-    html: emailContent,
-    fromEmail: `"KalyanaShobha Security" <noreply@kalyanashobha.in>`
-});
+            to: email, 
+            subject: "Your Password Reset OTP", 
+            html: emailContent, // Now this matches perfectly
+            fromEmail: `"KalyanaShobha Security" <noreply@kalyanashobha.in>`
+        });
 
         res.json({ success: true, message: "OTP sent to your registered email." });
 
     } catch (err) {
-        console.error(err);
+        console.error("Forgot Password Error:", err);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+
 
 // ======================== VERIFY OTP =========================
 app.post("/api/auth/verify-otp", async (req, res) => {
