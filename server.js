@@ -231,11 +231,13 @@ const generateEmailTemplate = (title, bodyContent) => {
 
 
 
-async function sendMail({ to, subject, html }) {
+async function sendMail({ to, subject, html, fromEmail }) {
     try {
+        // Default to support@kalyanashobha.in if fromEmail is not provided
+        const sender = fromEmail || `"KalyanaShobha Support" <support@kalyanashobha.in>`;
+
         await transporter.sendMail({
-            // FIXED: Matches the auth user exactly
-            from: `"KalyanaShobha Notifications" <support@kalyanashobha.in>`, 
+            from: sender, 
             to, 
             subject,
             html 
@@ -246,6 +248,7 @@ async function sendMail({ to, subject, html }) {
         return false;
     }
 }
+
 
 
 
@@ -495,7 +498,12 @@ app.post("/api/agent/auth/login-init", async (req, res) => {
              <p>Your OTP for Agent Dashboard login is:</p>
              <h2 style="color: #2c3e50; letter-spacing: 5px;">${otpCode}</h2>`
         );
-        await sendMail({ to: email, subject: "Agent Login OTP", html: emailContent });
+        await sendMail({ 
+    to: email, 
+    subject: "Your Login OTP", 
+    html: emailContent,
+    fromEmail: `"KalyanaShobha Security" <noreply@kalyanashobha.in>`
+});
 
         res.json({ success: true, message: "OTP sent to email" });
 
@@ -602,7 +610,12 @@ app.post("/api/admin/auth/login-init", async (req, res) => {
              <p>This code is valid for 5 minutes. If this wasn't you, please change your password immediately.</p>`
         );
 
-        await sendMail({ to: email, subject: "Admin Login Verification", html: emailContent });
+        await sendMail({ 
+    to: email, 
+    subject: "Your Login OTP", 
+    html: emailContent,
+    fromEmail: `"KalyanaShobha Security" <noreply@kalyanashobha.in>`
+});
 
         res.json({ success: true, message: "OTP sent to registered admin email." });
 
@@ -933,7 +946,12 @@ app.post("/api/auth/forgot-password", async (req, res) => {
              <p>This OTP is valid for <strong>5 minutes</strong>.</p>`
         );
 
-        await sendMail({ to: email, subject: "Reset Password - OTP Verification", html: htmlTemplate });
+        await sendMail({ 
+    to: email, 
+    subject: "Your Login OTP", 
+    html: emailContent,
+    fromEmail: `"KalyanaShobha Security" <noreply@kalyanashobha.in>`
+});
 
         res.json({ success: true, message: "OTP sent to your registered email." });
 
@@ -1136,7 +1154,13 @@ app.post("/api/auth/login-init", async (req, res) => {
              <p>This code is valid for 5 minutes. Do not share this code with anyone.</p>`
         );
 
-        await sendMail({ to: email, subject: "Your Login OTP", html: emailContent });
+
+        await sendMail({ 
+    to: email, 
+    subject: "Your Login OTP", 
+    html: emailContent,
+    fromEmail: `"KalyanaShobha Security" <noreply@kalyanashobha.in>`
+});
         res.json({ success: true, message: "OTP sent to email." });
 
     } catch (e) { 
