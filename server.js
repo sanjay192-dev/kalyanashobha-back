@@ -4172,7 +4172,105 @@ app.post("/api/agent/auth/reset-password", async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-         
+
+// ====================================================================
+// ADMIN FORGOT PASSWORD WORKFLOW
+// ====================================================================
+
+// 1. Admin Forgot Password (SEND OTP)
+app.post("/api/admin/auth/forgot-password", async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        // Ensure the email belongs to an Admin
+        const admin = await Admin.findOne({ email });
+        if (!admin) {
+            return res.status(404).json({ success: false, message: "Admin email not found" });
+        }
+
+        // Generate OTP & Save to MongoDB
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        await Otp.deleteMany({ email }); // Clear old OTPs
+        await Otp.create({ email, otp: otpCode });
+
+        const emailContent = generateEmailTemplate(
+            "Admin Password Reset Verification",
+            `<p>Hello ${admin.username},</p>
+             <p>A request was made to reset your Admin Dashboard password. Your verification code is:</p>
+             <h2 style="letter-spacing: 3px; color:#c0392b;">${otpCode}</h2>
+             <p>This code is valid for <strong>5 minutes</strong>. If you did not request this, please ignore this email.</p>`
+        );
+
+        // Send Email using the noreply alias
+        await sendMail({ 
+            to: email, 
+            subject: "Admin Password Reset OTP", 
+            html: emailContent,
+            fromEmail: `"KalyanaShobha Security" <noreply@kalyanashobha.in>`
+        });
+
+        res.json({ success: true, message: "OTP sent to registered admin email." });
+
+    } catch (err) {
+        console.error("Admin Forgot Password Error:", err);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// 2. Admin Verify OTP
+app.post("/api/admin/auth/verify-otp", async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+
+        const otpRecord = await Otp.findOne({ email, otp });
+
+        if (!otpRecord) {
+            return res.status(400).json({ success: false, message: "Invalid or Expired OTP" });
+        }
+
+        // OTP matched - update the record to mark it as verified
+        otpRecord.otp = "VERIFIED";
+        await otpRecord.save();
+
+        res.json({ success: true, message: "OTP verified successfully" });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// 3. Admin Reset Password
+app.post("/api/admin/auth/reset-password", async (req, res) => {
+    try {
+        const { email, newPassword } = req.body;
+
+        // Check if there is a VERIFIED record in the database
+        const verifiedRecord = await Otp.findOne({ email, otp: "VERIFIED" });
+        if (!verifiedRecord) {
+            return res.status(400).json({ success: false, message: "OTP not verified or session expired" });
+        }
+
+        const admin = await Admin.findOne({ email });
+        if (!admin) {
+            return res.status(404).json({ success: false, message: "Admin not found" });
+        }
+
+        // Hash the new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        // Update the admin's password and save
+        admin.password = hashedPassword;
+        await admin.save();
+
+        // Delete the used OTP record to prevent reuse
+        await Otp.deleteOne({ _id: verifiedRecord._id });
+
+        res.json({ success: true, message: "Admin password reset successful!" });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
 
 
 const PORT = process.env.PORT || 5000;
