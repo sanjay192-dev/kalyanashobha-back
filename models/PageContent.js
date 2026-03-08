@@ -5,7 +5,7 @@ const pageContentSchema = new mongoose.Schema({
         type: String, 
         required: true, 
         unique: true, 
-        enum: ['terms', 'refund', 'about'] // Restricts to these specific pages
+        enum: ['terms', 'refund', 'about', 'faq'] // Added 'faq' to the allowed enum values
     },
     content: { 
         type: String, // You can store plain text or HTML here (from a Rich Text Editor)
