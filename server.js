@@ -231,9 +231,12 @@ const generateEmailTemplate = (title, bodyContent) => {
 
 
 
+
+
+
 async function sendMail({ to, subject, html, fromEmail }) {
     try {
-        // Default to support@kalyanashobha.in if fromEmail is not provided
+        // We set a smart default: if no fromEmail is passed, it uses support@
         const sender = fromEmail || `"KalyanaShobha Support" <support@kalyanashobha.in>`;
 
         await transporter.sendMail({
@@ -248,9 +251,6 @@ async function sendMail({ to, subject, html, fromEmail }) {
         return false;
     }
 }
-
-
-
 
 
 
@@ -1463,8 +1463,12 @@ app.post("/api/admin/users/status", verifyAdmin, async (req, res) => {
                 `<p>We are pleased to inform you that your profile has been successfully verified and approved by our administration team.</p>
                  <p>Your profile is now visible to other members. Good luck with your search.</p>`
             );
-            await sendMail({ to: user.email, subject: "Profile Status: Approved", html: emailContent });
-
+            await sendMail({ 
+    to: user.email, 
+    subject: "Profile Status: Approved", 
+    html: emailContent,
+    fromEmail: `"KalyanaShobha Admin" <admin@kalyanashobha.in>` 
+});
         } else if (action === 'reject') {
             user.isApproved = false; user.rejectionReason = reason;
             const emailContent = generateEmailTemplate(
@@ -1473,8 +1477,14 @@ app.post("/api/admin/users/status", verifyAdmin, async (req, res) => {
                  <p><strong>Reason:</strong> ${reason}</p>
                  <p>Please log in and update your profile information or photos accordingly to be reconsidered.</p>`
             );
-            await sendMail({ to: user.email, subject: "Action Required: Profile Update", html: emailContent });
-
+             // For Rejection
+     await sendMail({ 
+         to: user.email, 
+         subject: "Action Required: Profile Update", 
+         html: emailContent,
+         fromEmail: `"KalyanaShobha Admin" <admin@kalyanashobha.in>`
+         });
+            
         } else if (action === 'block') { user.isActive = false; }
           else if (action === 'unblock') { user.isActive = true; }
 
@@ -1989,7 +1999,14 @@ app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res)
             // CORRECTION: Add await so the loop waits for email to send
             // ---------------------------------------------------------
             try {
-                await sendMail({ to: user.email, subject: "Membership Activated", html: emailContent });
+               // For Success
+await sendMail({ 
+    to: user.email, 
+    subject: "Membership Activated", 
+    html: emailContent,
+    fromEmail: `"KalyanaShobha Admin" <admin@kalyanashobha.in>`
+});
+                
                 console.log("Approval email sent.");
             } catch (emailErr) {
                 console.error("Failed to send approval email:", emailErr);
@@ -2010,7 +2027,13 @@ app.post("/api/admin/payment/registration/verify", verifyAdmin, async (req, res)
             // CORRECTION: Add await here too
             // ---------------------------------------------------------
             try {
-                await sendMail({ to: user.email, subject: "Action Required: Payment Issue", html: emailContent });
+                // For Rejection
+await sendMail({ 
+    to: user.email, 
+    subject: "Action Required: Payment Issue", 
+    html: emailContent,
+    fromEmail: `"KalyanaShobha Admin" <admin@kalyanashobha.in>`
+});
                 console.log("Rejection email sent.");
             } catch (emailErr) {
                 console.error("Failed to send rejection email:", emailErr);
@@ -2795,15 +2818,26 @@ app.post("/api/admin/users/restrict", verifyAdmin, async (req, res) => {
                  <p>You will no longer be able to log in.</p>
                  <p>Please contact support if you believe this is an error.</p>`
             );
-            sendMail({ to: user.email, subject: "Account Status Update"
-                      , html: emailContent });
+            await sendMail({ 
+    to: user.email, 
+    subject: "Account Status Update", 
+    html: emailContent,
+    fromEmail: `"KalyanaShobha Admin" <admin@kalyanashobha.in>`
+});
+            
         } else {
              const emailContent = generateEmailTemplate(
                 "Account Access Restored",
                 `<p>Your account restriction has been removed.</p>
                  <p>You can now log in to your dashboard.</p>`
             );
-            sendMail({ to: user.email, subject: "Account Status Update", html: emailContent });
+            await sendMail({ 
+    to: user.email, 
+    subject: "Account Status Update", 
+    html: emailContent,
+    fromEmail: `"KalyanaShobha Admin" <admin@kalyanashobha.in>`
+});
+
         }
 
         res.json({ success: true, message: `User successfully ${actionWord}` });
