@@ -28,8 +28,17 @@ const UserSchema = new mongoose.Schema({
   // --- F. Basic Information ---
   maritalStatus: { type: String, required: true },
   height: { type: Number }, 
-  diet: { type: String, enum: ['Veg', 'Non-Veg', 'Eggetarian'] },
-
+  diet: { 
+  type: String, 
+  enum: [
+    'Vegetarian',
+    'Non-Vegetarian',
+    'Eggetarian',
+    'Vegan',
+    'Jain',
+    'Occasionally Non-Veg'
+  ] 
+},
   // --- G. Education ---
   highestQualification: { type: String },
   collegeName: { type: String },
