@@ -2667,7 +2667,6 @@ app.get("/api/agent/users", verifyAgent, async (req, res) => {
 
 
                     
-            
 // 3. Register a User (Manual Entry by Agent) - Includes Pending Data Staging
 app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
     try {
@@ -2737,8 +2736,6 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
         await user.save();
 
         // --- THE MAGIC FIX: Reuse the global helper and AWAIT it ---
-        // This perfectly checks the 8 fields (Community, SubCommunity, Country, State, City, Gothra, Designation, Education)
-        // using the concurrent, crash-proof Promise logic we already created!
         await checkAndStageNewMasterData(user._id, data);
 
         // 5. PREPARE EMAILS
@@ -2751,7 +2748,7 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
              <p><strong>Login Password:</strong> ${data.password}</p>
              <p>Please login to your dashboard to view matches.</p>`
         );
-        
+
         const agentNotificationContent = generateEmailTemplate(
             "New User Registered Successfully",
             `<p>Dear ${agent.name},</p>
@@ -2761,11 +2758,41 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
              <p>This user has been added to your referral list and you can track their status in your agent dashboard.</p>`
         );
 
+        // --- NEW: ADMIN NOTIFICATION CONTENT ---
+        const adminAlertContent = generateEmailTemplate(
+            "Agent Registration Alert",
+            `<p>An agent has manually registered a new user on the platform.</p>
+             <p><strong>Agent Name:</strong> ${agent.name}</p>
+             <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px;">
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd; width: 40%; color: #666;"><strong>User Name:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.firstName} ${user.lastName}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Profile ID:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>${user.uniqueId}</strong></td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Email:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.email}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Mobile:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.mobileNumber}</td>
+                </tr>
+             </table>
+             <div style="margin-top: 20px; text-align: center;">
+                <a href="https://kalyanashobha.in/admin" style="background-color: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-size: 14px;">Go to Admin Dashboard</a>
+             </div>`
+        );
+
         // 6. SEND EMAILS (Parallel & Awaited)
         try {
             await Promise.all([
                 sendMail({ to: user.email, subject: "Profile Created via Agent", html: userWelcomeContent }),
-                sendMail({ to: agent.email, subject: `Registration Successful: ${user.firstName}`, html: agentNotificationContent })
+                sendMail({ to: agent.email, subject: `Registration Successful: ${user.firstName}`, html: agentNotificationContent }),
+                // --- NEW: SEND TO ADMIN ---
+                sendMail({ to: EMAIL_USER, subject: `New Agent Registration: ${user.uniqueId}`, html: adminAlertContent })
             ]);
         } catch (emailError) {
             console.error("Email Sending Failed:", emailError);
@@ -2778,7 +2805,6 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
         res.status(500).json({ success: false, message: e.message });
     }
 });
-
             
         
 
