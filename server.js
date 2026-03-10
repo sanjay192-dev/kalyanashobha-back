@@ -64,6 +64,9 @@ const connectDB = async () => {
     }
 };
 
+
+
+
 // 3. MIDDLEWARE: Ensure DB is connected BEFORE every request
 app.use(async (req, res, next) => {
     await connectDB();
@@ -625,17 +628,15 @@ app.post("/api/admin/auth/login-init", async (req, res) => {
     }
 });
 
+
 // --- STEP 2: Verify OTP & Issue Token ---
 app.post("/api/admin/auth/login-verify", async (req, res) => {
     try {
         const { email, otp } = req.body;
-
         const otpRecord = await Otp.findOne({ email, otp });
 
         if (otpRecord) {
             const admin = await Admin.findOne({ email });
-
-            // Clear OTP to prevent reuse
             await Otp.deleteOne({ _id: otpRecord._id }); 
 
             const token = jwt.sign(
@@ -647,9 +648,14 @@ app.post("/api/admin/auth/login-verify", async (req, res) => {
             res.json({ 
                 success: true, 
                 token, 
-                admin: { username: admin.username, email: admin.email, role: admin.role } 
+                // This is the important part! Sending permissions back.
+                admin: { 
+                    username: admin.username, 
+                    email: admin.email, 
+                    role: admin.role,
+                    permissions: admin.permissions 
+                } 
             });
-
         } else {
             res.status(400).json({ success: false, message: "Invalid or Expired OTP" });
         }
@@ -657,6 +663,7 @@ app.post("/api/admin/auth/login-verify", async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" }); 
     }
 });
+
 
 
 app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
@@ -3339,22 +3346,17 @@ app.post("/api/admin/add-sub-community", verifyAdmin, async (req, res) => {
 // ====================================================================
 
 // 1. Get ALL Communities (Names + Sub-communities)
-// Usage: Call this when the Registration Page loads to fill the first dropdown.
 app.get("/api/public/get-all-communities", async (req, res) => {
     try {
-        // .lean() converts Mongoose objects to plain JSON for faster performance
-        const communities = await Community.find().select('name subCommunities').lean();
+        // ADD .sort({ order: 1 }) HERE
+        const communities = await Community.find().sort({ order: 1 }).select('name subCommunities order').lean();
 
-        res.json({
-            success: true,
-            count: communities.length,
-            data: communities
-        });
+        res.json({ success: true, count: communities.length, data: communities });
     } catch (e) {
-        console.error("Get Communities Error:", e);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+
 
 // 2. Get Sub-Communities for a Specific Community
 // Usage: Call this if you prefer to load data ONLY after the user selects a Religion.
@@ -3693,8 +3695,9 @@ app.post("/api/admin/interest/process", verifyAdmin, async (req, res) => {
 app.get("/api/public/master-data/:category", async (req, res) => {
     try {
         const { category } = req.params;
-        const data = await MasterData.find({ category }).select('name subItems').lean();
-        
+        // ADD .sort({ order: 1 }) HERE
+        const data = await MasterData.find({ category }).sort({ order: 1 }).select('name subItems order').lean();
+
         res.json({ success: true, count: data.length, data });
     } catch (e) {
         res.status(500).json({ success: false, message: "Server Error fetching master data" });
@@ -4343,9 +4346,124 @@ app.post("/api/admin/auth/reset-password", async (req, res) => {
     }
 });
 
+// ====================================================================
+// 1. REORDER MASTER DATA (Independent Items)
+// ====================================================================
+app.post("/api/admin/master-data/reorder", verifyAdmin, async (req, res) => {
+    try {
+        const { orderedItems } = req.body; 
+        // Expected frontend payload: [{ _id: "123", order: 1 }, { _id: "456", order: 2 }]
+
+        if (!orderedItems || !Array.isArray(orderedItems)) {
+            return res.status(400).json({ success: false, message: "Invalid data format" });
+        }
+
+        const bulkOps = orderedItems.map(item => ({
+            updateOne: {
+                filter: { _id: item._id },
+                update: { order: item.order }
+            }
+        }));
+
+        await MasterData.bulkWrite(bulkOps);
+        res.json({ success: true, message: "Master data order updated successfully" });
+
+    } catch (e) {
+        console.error("Master Data Reorder Error:", e);
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// ====================================================================
+// 2. REORDER MAIN COMMUNITIES
+// ====================================================================
+app.post("/api/admin/community/reorder", verifyAdmin, async (req, res) => {
+    try {
+        const { orderedItems } = req.body;
+
+        if (!orderedItems || !Array.isArray(orderedItems)) {
+            return res.status(400).json({ success: false, message: "Invalid data format" });
+        }
+
+        const bulkOps = orderedItems.map(item => ({
+            updateOne: {
+                filter: { _id: item._id },
+                update: { order: item.order }
+            }
+        }));
+
+        await Community.bulkWrite(bulkOps);
+        res.json({ success: true, message: "Community order updated successfully" });
+
+    } catch (e) {
+        console.error("Community Reorder Error:", e);
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// ====================================================================
+// 3. REORDER SUB-COMMUNITIES (Inside a specific Community)
+// ====================================================================
+app.post("/api/admin/community/:id/reorder-sub", verifyAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { orderedSubCommunities } = req.body; 
+        // Expected payload: ["Yadav", "Brahmin", "Reddy"] (Strings in the new dragged order)
+
+        if (!orderedSubCommunities || !Array.isArray(orderedSubCommunities)) {
+            return res.status(400).json({ success: false, message: "Invalid array format" });
+        }
+
+        // Just overwrite the array. MongoDB keeps arrays in the exact order you save them!
+        const community = await Community.findByIdAndUpdate(
+            id,
+            { subCommunities: orderedSubCommunities },
+            { new: true }
+        );
+
+        if (!community) {
+            return res.status(404).json({ success: false, message: "Community not found" });
+        }
+
+        res.json({ success: true, message: "Sub-community order updated", data: community });
+
+    } catch (e) {
+        console.error("Sub-Community Reorder Error:", e);
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// Create a new Sub Admin / Moderator
+app.post("/api/admin/create-moderator", verifyAdmin, async (req, res) => {
+    try {
+        const { username, email, password, permissions } = req.body;
+
+        // Check if the current user creating this is a SuperAdmin
+        const creator = await Admin.findById(req.adminId);
+        if (creator.role !== 'SuperAdmin') {
+            return res.status(403).json({ success: false, message: "Only SuperAdmin can create Moderators" });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        const newModerator = new Admin({
+            username,
+            email,
+            password: hashedPassword,
+            role: 'Moderator',
+            permissions: permissions // e.g., ["users", "vendors", "vendor-leads"]
+        });
+
+        await newModerator.save();
+        res.json({ success: true, message: "Moderator created successfully" });
+
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
-
-
