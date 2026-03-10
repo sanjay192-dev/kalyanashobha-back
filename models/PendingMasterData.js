@@ -13,3 +13,4 @@ const pendingMasterDataSchema = new mongoose.Schema({
 pendingMasterDataSchema.index({ category: 1, value: 1, parentValue: 1 }, { unique: true });
 
 module.exports = mongoose.model('PendingMasterData', pendingMasterDataSchema);
+
