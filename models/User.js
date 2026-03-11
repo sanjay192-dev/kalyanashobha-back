@@ -45,7 +45,9 @@ const UserSchema = new mongoose.Schema({
 
   // --- H. Work & Income ---
   annualIncome: { type: String }, 
-  workType: { type: String, enum: ['Govt', 'Private', 'Business', 'Self-Employed'] },
+    // NEW
+  workType: { type: String },
+
   jobRole: { type: String },
   companyName: { type: String },
 
