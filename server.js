@@ -4463,6 +4463,69 @@ app.post("/api/admin/create-moderator", verifyAdmin, async (req, res) => {
     }
 });
 
+// ====================================================================
+// ADMIN: EDIT USER PROFILE & PHOTOS
+// ====================================================================
+app.put("/api/admin/users/:id/update", verifyAdmin, uploadProfile.array("newPhotos", 5), async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const { 
+            firstName, lastName, gender, dob, maritalStatus, height, diet,
+            community, subCommunity, gothra, highestQualification, collegeName,
+            jobRole, companyName, annualIncome, city, state, country, residentsIn,
+            existingPhotos // Array or string of photos the admin wants to KEEP
+        } = req.body;
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        // 1. Handle Existing Photos
+        let updatedPhotos = [];
+        if (existingPhotos) {
+            updatedPhotos = Array.isArray(existingPhotos) ? existingPhotos : [existingPhotos];
+        }
+
+        // 2. Delete discarded photos from Cloudinary
+        const photosToDelete = user.photos.filter(photo => !updatedPhotos.includes(photo));
+        if (photosToDelete.length > 0) {
+            const deletePromises = photosToDelete.map(imageUrl => {
+                const parts = imageUrl.split('/');
+                const fileWithExt = parts.pop();
+                const folder = parts.pop();
+                const publicId = `${folder}/${fileWithExt.split('.')[0]}`;
+                return cloudinary.uploader.destroy(publicId);
+            });
+            await Promise.all(deletePromises);
+        }
+
+        // 3. Add Newly Uploaded Photos
+        if (req.files && req.files.length > 0) {
+            const newPhotoUrls = req.files.map(f => f.path);
+            updatedPhotos = [...updatedPhotos, ...newPhotoUrls];
+        }
+
+        // Cap at 5 photos
+        if (updatedPhotos.length > 5) updatedPhotos = updatedPhotos.slice(0, 5);
+
+        // 4. Update Database
+        const updatedUser = await User.findByIdAndUpdate(
+            userId, 
+            { $set: {
+                firstName, lastName, gender, dob, maritalStatus, height, diet,
+                community, subCommunity, gothra, highestQualification, collegeName,
+                jobRole, companyName, annualIncome, city, state, country, residentsIn,
+                photos: updatedPhotos
+            }},
+            { new: true } 
+        ).select("-password");
+
+        res.json({ success: true, message: "Profile updated successfully", user: updatedUser });
+
+    } catch (e) {
+        console.error("Admin Profile Update Error:", e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
 
 
 const PORT = process.env.PORT || 5000;
