@@ -97,6 +97,7 @@ const UserSchema = new mongoose.Schema({
 
   familyDetails: {
     fatherName: { type: String },
+familyType: { type: String },
     fatherOccupation: { type: String },
     motherName: { type: String },
     motherOccupation: { type: String },
