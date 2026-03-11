@@ -13,6 +13,8 @@ const MasterData = require('./models/MasterData');
 const Otp = require('./models/Otp');
 const PendingMasterData = require('./models/PendingMasterData');
 const Testimonial = require('./models/Testimonial');
+const Preference = require('./models/Preference');
+
 
 // ---------------- MODELS ----------------
 const User = require('./models/User');
@@ -4555,6 +4557,37 @@ app.put("/api/admin/users/:id/update", verifyAdmin, uploadProfile.array("newPhot
 });
                 
 
+// ====================================================================
+// USER PREFERENCES (GET & POST)
+// ====================================================================
+
+// GET: Fetch User Preferences
+app.get("/api/user/preference", verifyUser, async (req, res) => {
+    try {
+        const preference = await Preference.findOne({ userId: req.userId });
+        res.json({ success: true, data: preference });
+    } catch (e) {
+        console.error("Fetch Preference Error:", e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// POST: Save or Update User Preferences
+app.post("/api/user/preference", verifyUser, async (req, res) => {
+    try {
+        // We use findOneAndUpdate with upsert: true
+        // If a preference exists, it updates it. If not, it creates a new one.
+        const updatedPref = await Preference.findOneAndUpdate(
+            { userId: req.userId },
+            { $set: { ...req.body, userId: req.userId } },
+            { new: true, upsert: true }
+        );
+        res.json({ success: true, message: "Partner preferences saved successfully!", data: updatedPref });
+    } catch (e) {
+        console.error("Save Preference Error:", e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
 
 
 const PORT = process.env.PORT || 5000;
