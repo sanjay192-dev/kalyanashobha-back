@@ -4462,7 +4462,6 @@ app.post("/api/admin/create-moderator", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: e.message });
     }
 });
-
 // ====================================================================
 // ADMIN: EDIT USER PROFILE & PHOTOS
 // ====================================================================
@@ -4473,7 +4472,9 @@ app.put("/api/admin/users/:id/update", verifyAdmin, uploadProfile.array("newPhot
             firstName, lastName, gender, dob, maritalStatus, height, diet,
             community, subCommunity, gothra, highestQualification, collegeName,
             jobRole, companyName, annualIncome, city, state, country, residentsIn,
-            existingPhotos // Array or string of photos the admin wants to KEEP
+            existingPhotos, // Array or string of photos the admin wants to KEEP
+            astrologyDetails, // <-- ADDED THIS
+            familyDetails     // <-- ADDED THIS
         } = req.body;
 
         const user = await User.findById(userId);
@@ -4485,8 +4486,8 @@ app.put("/api/admin/users/:id/update", verifyAdmin, uploadProfile.array("newPhot
             updatedPhotos = Array.isArray(existingPhotos) ? existingPhotos : [existingPhotos];
         }
 
-        // 2. Delete discarded photos from Cloudinary
-        const photosToDelete = user.photos.filter(photo => !updatedPhotos.includes(photo));
+        // 2. Delete discarded photos from Cloudinary (Added fallback [] to prevent crashes)
+        const photosToDelete = (user.photos || []).filter(photo => !updatedPhotos.includes(photo));
         if (photosToDelete.length > 0) {
             const deletePromises = photosToDelete.map(imageUrl => {
                 const parts = imageUrl.split('/');
@@ -4504,17 +4505,23 @@ app.put("/api/admin/users/:id/update", verifyAdmin, uploadProfile.array("newPhot
             updatedPhotos = [...updatedPhotos, ...newPhotoUrls];
         }
 
-        // Cap at 5 photos
-        if (updatedPhotos.length > 5) updatedPhotos = updatedPhotos.slice(0, 5);
+        // Cap at 2 photos as requested
+        if (updatedPhotos.length > 2) updatedPhotos = updatedPhotos.slice(0, 2);
 
-        // 4. Update Database
+        // 4. Parse the newly added JSON strings sent from Frontend
+        const parsedAstrology = astrologyDetails ? JSON.parse(astrologyDetails) : {};
+        const parsedFamily = familyDetails ? JSON.parse(familyDetails) : {};
+
+        // 5. Update Database
         const updatedUser = await User.findByIdAndUpdate(
             userId, 
             { $set: {
                 firstName, lastName, gender, dob, maritalStatus, height, diet,
                 community, subCommunity, gothra, highestQualification, collegeName,
                 jobRole, companyName, annualIncome, city, state, country, residentsIn,
-                photos: updatedPhotos
+                photos: updatedPhotos,
+                astrologyDetails: parsedAstrology, // <-- SAVE ASTROLOGY
+                familyDetails: parsedFamily        // <-- SAVE FAMILY
             }},
             { new: true } 
         ).select("-password");
@@ -4526,7 +4533,7 @@ app.put("/api/admin/users/:id/update", verifyAdmin, uploadProfile.array("newPhot
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-
+                 
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
