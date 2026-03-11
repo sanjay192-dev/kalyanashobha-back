@@ -3940,6 +3940,11 @@ app.get("/api/admin/pending-data", verifyAdmin, async (req, res) => {
     }
 });
 
+
+// ====================================================================
+// ADMIN: PENDING MASTER DATA APPROVALS
+// ====================================================================
+
 // 2. Approve or Reject Data
 app.post("/api/admin/pending-data/action", verifyAdmin, async (req, res) => {
     try {
@@ -3983,19 +3988,21 @@ app.post("/api/admin/pending-data/action", verifyAdmin, async (req, res) => {
             }
 
             pendingEntry.status = 'Approved';
-        } else {
-            pendingEntry.status = 'Rejected';
-        }
+            await pendingEntry.save();
+            return res.json({ success: true, message: "Data approved successfully" });
 
-        await pendingEntry.save();
-        res.json({ success: true, message: `Data ${action}d successfully` });
+        } else {
+            // --- NEW LOGIC: DELETE IF REJECTED ---
+            await PendingMasterData.findByIdAndDelete(pendingId);
+            return res.json({ success: true, message: "Data rejected and permanently deleted" });
+        }
 
     } catch (e) {
         console.error(e);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-
+        
 // ====================================================================
 // DYNAMIC PAGE CONTENT (Terms, Refund, About)
 // ====================================================================
