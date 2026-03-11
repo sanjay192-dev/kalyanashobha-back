@@ -2929,6 +2929,7 @@ app.post("/api/admin/users/restrict", verifyAdmin, async (req, res) => {
     }
 });
 
+
 // ====================================================================
 // UNIFIED DASHBOARD & SEARCH API (With Interest Status Check)
 // ====================================================================
@@ -2955,7 +2956,7 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
             statusMap[otherId] = inter.status; 
         });
 
-        // 4. Destructure Filters from Body (ADDED PADA AND COUNTRY)
+        // 4. Destructure Filters from Body (ADDED COMPLEXION)
         const {
             searchId,
             minAge, maxAge,
@@ -2966,18 +2967,19 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
             subCommunity,
             maritalStatus,
             occupation,
-            // New Location / Astro Filters
+            // Location / Astro Filters
             country,
             state,
             city,
             diet,
             motherTongue,
             star,
-            pada 
+            pada,
+            complexion // <--- ADDED THIS
         } = req.body;
 
-        // 5. CHECK PERMISSIONS
-        const hasFilters = searchId || minAge || maxAge || minHeight || maxHeight || minSalary || education || community || subCommunity || maritalStatus || occupation || country || state || city || diet || motherTongue || star || pada;
+        // 5. CHECK PERMISSIONS (ADDED COMPLEXION)
+        const hasFilters = searchId || minAge || maxAge || minHeight || maxHeight || minSalary || education || community || subCommunity || maritalStatus || occupation || country || state || city || diet || motherTongue || star || pada || complexion; // <--- ADDED THIS
 
         if (hasFilters && !isViewerPremium) {
             return res.status(403).json({ 
@@ -3029,6 +3031,7 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
                 if (motherTongue) query['astrologyDetails.motherTongue'] = motherTongue;
                 if (star) query['astrologyDetails.star'] = star;
                 if (pada) query['astrologyDetails.pada'] = pada;
+                if (complexion) query['astrologyDetails.complexion'] = complexion; // <--- ADDED THIS
             }
         }
 
@@ -3087,6 +3090,8 @@ app.post("/api/user/dashboard/feed", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+            
+                
   
                                                                           
 
