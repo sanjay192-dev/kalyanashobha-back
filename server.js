@@ -4462,8 +4462,9 @@ app.post("/api/admin/create-moderator", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: e.message });
     }
 });
+
 // ====================================================================
-// ADMIN: EDIT USER PROFILE & PHOTOS
+// ADMIN: EDIT USER PROFILE & PHOTOS (NOW WITH MASTER DATA STAGING)
 // ====================================================================
 app.put("/api/admin/users/:id/update", verifyAdmin, uploadProfile.array("newPhotos", 5), async (req, res) => {
     try {
@@ -4472,9 +4473,9 @@ app.put("/api/admin/users/:id/update", verifyAdmin, uploadProfile.array("newPhot
             firstName, lastName, gender, dob, maritalStatus, height, diet,
             community, subCommunity, gothra, highestQualification, collegeName,
             jobRole, companyName, annualIncome, city, state, country, residentsIn,
-            existingPhotos, // Array or string of photos the admin wants to KEEP
-            astrologyDetails, // <-- ADDED THIS
-            familyDetails     // <-- ADDED THIS
+            existingPhotos, 
+            astrologyDetails, 
+            familyDetails     
         } = req.body;
 
         const user = await User.findById(userId);
@@ -4486,7 +4487,7 @@ app.put("/api/admin/users/:id/update", verifyAdmin, uploadProfile.array("newPhot
             updatedPhotos = Array.isArray(existingPhotos) ? existingPhotos : [existingPhotos];
         }
 
-        // 2. Delete discarded photos from Cloudinary (Added fallback [] to prevent crashes)
+        // 2. Delete discarded photos from Cloudinary
         const photosToDelete = (user.photos || []).filter(photo => !updatedPhotos.includes(photo));
         if (photosToDelete.length > 0) {
             const deletePromises = photosToDelete.map(imageUrl => {
@@ -4505,7 +4506,7 @@ app.put("/api/admin/users/:id/update", verifyAdmin, uploadProfile.array("newPhot
             updatedPhotos = [...updatedPhotos, ...newPhotoUrls];
         }
 
-        // Cap at 2 photos as requested
+        // Cap at 2 photos
         if (updatedPhotos.length > 2) updatedPhotos = updatedPhotos.slice(0, 2);
 
         // 4. Parse the newly added JSON strings sent from Frontend
@@ -4520,11 +4521,18 @@ app.put("/api/admin/users/:id/update", verifyAdmin, uploadProfile.array("newPhot
                 community, subCommunity, gothra, highestQualification, collegeName,
                 jobRole, companyName, annualIncome, city, state, country, residentsIn,
                 photos: updatedPhotos,
-                astrologyDetails: parsedAstrology, // <-- SAVE ASTROLOGY
-                familyDetails: parsedFamily        // <-- SAVE FAMILY
+                astrologyDetails: parsedAstrology, 
+                familyDetails: parsedFamily        
             }},
             { new: true } 
         ).select("-password");
+
+        // --- NEW: THE MAGIC STAGING LOGIC FOR ADMIN EDITS ---
+        // This will check if the Admin typed a new city, gothra, education, etc. 
+        // and push it to the Pending Master Data table for approval!
+        await checkAndStageNewMasterData(userId, req.body);
+        await checkAndStageExtraMasterData(userId, parsedAstrology);
+        // ------------------------------------------------------
 
         res.json({ success: true, message: "Profile updated successfully", user: updatedUser });
 
@@ -4533,7 +4541,9 @@ app.put("/api/admin/users/:id/update", verifyAdmin, uploadProfile.array("newPhot
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-                 
+                
+
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
