@@ -14,7 +14,7 @@ const Otp = require('./models/Otp');
 const PendingMasterData = require('./models/PendingMasterData');
 const Testimonial = require('./models/Testimonial');
 const Preference = require('./models/Preference');
-
+const PremiumRequest = require('./models/PremiumRequest');
 const Settings = require('./models/Settings');
 
 // ---------------- MODELS ----------------
@@ -4745,6 +4745,50 @@ app.post("/api/user/premium-click-alert", verifyUser, async (req, res) => {
     }
 });
 
+// ====================================================================
+// ADMIN: MANAGE PREMIUM REQUESTS
+// ====================================================================
+
+// 1. Fetch all premium requests
+app.get("/api/admin/premium-requests", verifyAdmin, async (req, res) => {
+    try {
+        const requests = await PremiumRequest.find()
+            .populate('userId', 'firstName lastName uniqueId email mobileNumber gender city state')
+            .sort({ requestDate: -1 }); // Newest first
+
+        res.json({ success: true, count: requests.length, data: requests });
+    } catch (error) {
+        console.error("Fetch Premium Requests Error:", error);
+        res.status(500).json({ success: false, message: "Server Error fetching requests" });
+    }
+});
+
+// 2. Update status of a request
+app.put("/api/admin/premium-requests/:id/status", verifyAdmin, async (req, res) => {
+    try {
+        const { status } = req.body;
+        const validStatuses = ['Pending', 'Contacted', 'Resolved'];
+        
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({ success: false, message: "Invalid status" });
+        }
+
+        const request = await PremiumRequest.findByIdAndUpdate(
+            req.params.id,
+            { status },
+            { new: true }
+        );
+
+        if (!request) {
+            return res.status(404).json({ success: false, message: "Request not found" });
+        }
+
+        res.json({ success: true, message: `Status updated to ${status}`, data: request });
+    } catch (error) {
+        console.error("Update Premium Request Error:", error);
+        res.status(500).json({ success: false, message: "Server Error updating status" });
+    }
+});
 
 
 
