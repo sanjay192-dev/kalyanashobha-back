@@ -4683,17 +4683,20 @@ app.get("/api/user/registration-fee", verifyUser, async (req, res) => {
 // 1. GET: Check if the user has already requested premium
 app.get("/api/user/premium-status", verifyUser, async (req, res) => {
     try {
-        const existingRequest = await PremiumRequest.findOne({ 
-            userId: req.userId, 
-            status: { $in: ['Pending', 'Contacted'] } 
-        });
+        // Fetch the most recent request for this user
+        const existingRequest = await PremiumRequest.findOne({ userId: req.userId }).sort({ requestDate: -1 });
 
-        res.json({ success: true, hasRequested: !!existingRequest });
+        if (existingRequest) {
+            res.json({ success: true, hasRequested: true, status: existingRequest.status });
+        } else {
+            res.json({ success: true, hasRequested: false, status: null });
+        }
     } catch (error) {
         console.error("Premium Status Error:", error);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+
 
 // 2. POST: Submit a new premium request
 app.post("/api/user/premium-click-alert", verifyUser, async (req, res) => {
