@@ -4642,6 +4642,92 @@ app.post("/api/user/premium-click-alert", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error notifying admin" });
     }
 });
+
+// ====================================================================
+// ADMIN: SETTINGS & FEES
+// ====================================================================
+
+// GET: Fetch current fee settings
+app.get("/api/admin/settings/fees", verifyAdmin, async (req, res) => {
+    try {
+        let settings = await Settings.findOne();
+        
+        // If no settings exist yet, return defaults
+        if (!settings) {
+            settings = { maleRegistrationFee: 0, femaleRegistrationFee: 0 };
+        }
+        
+        res.json({ success: true, data: settings });
+    } catch (error) {
+        console.error("Fetch Settings Error:", error);
+        res.status(500).json({ success: false, message: "Server Error fetching settings" });
+    }
+});
+
+// POST: Update fee settings
+app.post("/api/admin/settings/fees", verifyAdmin, async (req, res) => {
+    try {
+        const { maleFee, femaleFee } = req.body;
+
+        if (maleFee === undefined || femaleFee === undefined) {
+            return res.status(400).json({ success: false, message: "Both male and female fees are required." });
+        }
+
+        // findOneAndUpdate with upsert ensures we only ever have ONE settings document
+        const updatedSettings = await Settings.findOneAndUpdate(
+            {}, // Empty filter targets the first document it finds
+            { 
+                $set: { 
+                    maleRegistrationFee: maleFee, 
+                    femaleRegistrationFee: femaleFee,
+                    lastUpdatedBy: req.adminId
+                } 
+            },
+            { new: true, upsert: true }
+        );
+
+        res.json({ success: true, message: "Fees updated successfully", data: updatedSettings });
+    } catch (error) {
+        console.error("Update Settings Error:", error);
+        res.status(500).json({ success: false, message: "Server Error updating settings" });
+    }
+});
+
+// ====================================================================
+// USER: GET REGISTRATION FEE
+// ====================================================================
+
+app.get("/api/user/registration-fee", verifyUser, async (req, res) => {
+    try {
+        const user = await User.findById(req.userId).select('gender isPaidMember');
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        let settings = await Settings.findOne();
+        
+        // Fallback in case the admin hasn't set the fees yet
+        if (!settings) {
+            settings = { maleRegistrationFee: 0, femaleRegistrationFee: 0 };
+        }
+
+        // Determine the fee based on the user's gender
+        const requiredFee = user.gender === 'Male' 
+            ? settings.maleRegistrationFee 
+            : settings.femaleRegistrationFee;
+
+        res.json({ 
+            success: true, 
+            fee: requiredFee, 
+            gender: user.gender,
+            isAlreadyPaid: user.isPaidMember
+        });
+
+    } catch (error) {
+        console.error("User Fee Fetch Error:", error);
+        res.status(500).json({ success: false, message: "Server Error fetching fee" });
+    }
+});
+
+
                                                                                
 
 const PORT = process.env.PORT || 5000;
