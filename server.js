@@ -4589,60 +4589,8 @@ app.post("/api/user/preference", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-// ====================================================================
-// NEW: PREMIUM MEMBERSHIP CLICK ALERT
-// ====================================================================
-app.post("/api/user/premium-click-alert", verifyUser, async (req, res) => {
-    try {
-        // 1. Fetch the user details using the token ID
-        const user = await User.findById(req.userId);
-        
-        if (!user) {
-            return res.status(404).json({ success: false, message: "User not found" });
-        }
 
-        // 2. Prepare Email Content for Admin using your existing template
-        const adminAlertContent = generateEmailTemplate(
-            "Premium Membership Interest Alert",
-            `<p>A user just clicked on the Premium Membership button and might be interested in upgrading or needs assistance.</p>
-             <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px;">
-                <tr>
-                    <td style="padding: 8px; border-bottom: 1px solid #ddd; width: 40%; color: #666;"><strong>Name:</strong></td>
-                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.firstName} ${user.lastName}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Profile ID:</strong></td>
-                    <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>${user.uniqueId}</strong></td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Email:</strong></td>
-                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.email}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Mobile:</strong></td>
-                    <td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.mobileNumber}</td>
-                </tr>
-             </table>
-             <div style="margin-top: 20px; text-align: center;">
-                <a href="https://kalyanashobha.in/admin" style="background-color: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-size: 14px;">Go to Admin Dashboard</a>
-             </div>`
-        );
 
-        // 3. Send Email to the Admin
-        await sendMail({ 
-            to: process.env.EMAIL_USER || "adepusanjay444@gmail.com", 
-            subject: `Premium Interest: ${user.firstName} (${user.uniqueId})`, 
-            html: adminAlertContent 
-        });
-
-        // 4. Send success response back to frontend
-        res.json({ success: true, message: "Admin notified successfully." });
-
-    } catch (error) {
-        console.error("Premium Click Alert Error:", error);
-        res.status(500).json({ success: false, message: "Server Error notifying admin" });
-    }
-});
 
 // ====================================================================
 // ADMIN: SETTINGS & FEES
@@ -4727,6 +4675,77 @@ app.get("/api/user/registration-fee", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error fetching fee" });
     }
 });
+
+// ====================================================================
+// NEW: PREMIUM MEMBERSHIP REQUEST LOGIC
+// ====================================================================
+
+// 1. GET: Check if the user has already requested premium
+app.get("/api/user/premium-status", verifyUser, async (req, res) => {
+    try {
+        const existingRequest = await PremiumRequest.findOne({ 
+            userId: req.userId, 
+            status: { $in: ['Pending', 'Contacted'] } 
+        });
+
+        res.json({ success: true, hasRequested: !!existingRequest });
+    } catch (error) {
+        console.error("Premium Status Error:", error);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+// 2. POST: Submit a new premium request
+app.post("/api/user/premium-click-alert", verifyUser, async (req, res) => {
+    try {
+        // Check if a request already exists
+        const existingRequest = await PremiumRequest.findOne({ 
+            userId: req.userId, 
+            status: { $in: ['Pending', 'Contacted'] } 
+        });
+
+        if (existingRequest) {
+            return res.json({ success: true, message: "You have already requested an upgrade. Our team will contact you shortly." });
+        }
+
+        const user = await User.findById(req.userId);
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        // Save the request to the database
+        const newRequest = new PremiumRequest({ userId: req.userId });
+        await newRequest.save();
+
+        // Prepare Email Content for Admin
+        const adminAlertContent = generateEmailTemplate(
+            "Premium Membership Request",
+            `<p>A user has requested an upgrade to Premium Membership.</p>
+             <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px;">
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; width: 40%; color: #666;"><strong>Name:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.firstName} ${user.lastName}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Profile ID:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>${user.uniqueId}</strong></td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Email:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.email}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Mobile:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${user.mobileNumber}</td></tr>
+             </table>
+             <div style="margin-top: 20px; text-align: center;">
+                <a href="https://kalyanashobha.in/admin" style="background-color: #2c3e50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; font-size: 14px;">Go to Admin Dashboard</a>
+             </div>`
+        );
+
+        // Send Email to Admin
+        await sendMail({ 
+            to: process.env.EMAIL_USER || "adepusanjay444@gmail.com", 
+            subject: `Premium Request: ${user.firstName} (${user.uniqueId})`, 
+            html: adminAlertContent 
+        });
+
+        res.json({ success: true, message: "Request sent successfully! Our team will contact you shortly." });
+
+    } catch (error) {
+        console.error("Premium Request Error:", error);
+        res.status(500).json({ success: false, message: "Server Error notifying admin" });
+    }
+});
+
+
 
 
                                                                                
