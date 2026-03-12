@@ -15,6 +15,7 @@ const PendingMasterData = require('./models/PendingMasterData');
 const Testimonial = require('./models/Testimonial');
 const Preference = require('./models/Preference');
 
+const Settings = require('./models/Settings');
 
 // ---------------- MODELS ----------------
 const User = require('./models/User');
