@@ -1818,7 +1818,7 @@ app.delete("/api/admin/vendors/:id", verifyAdmin, async (req, res) => {
 // E. PAYMENTS & INTERESTS
 // ====================================================================
 
-// 1. Submit Payment (User) - UPDATED WITH DUPLICATE CHECK
+// 1. Submit Payment (User) - UPDATED WITH DUPLICATE CHECK & PRO EMAIL
 app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("screenshot"), async (req, res) => {
     try {
         // --- NEW LOGIC START: Check for existing pending request ---
@@ -1828,6 +1828,11 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
         });
 
         if (existingPayment) {
+            // CLOUDINARY CLEANUP: If Multer uploaded the file, delete it to save storage space
+            if (req.file && req.file.filename) {
+                await cloudinary.uploader.destroy(req.file.filename);
+            }
+
             return res.json({ 
                 success: false, 
                 message: "You have already submitted a payment request. Please wait for admin verification.", 
@@ -1853,32 +1858,57 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
         });
         await payment.save();
 
-        const emailContent = generateEmailTemplate(
+        // --- USER EMAIL CONTENT ---
+        const userEmailContent = generateEmailTemplate(
             "Payment Received",
             `<p>We have received your payment submission of <strong>Rs. ${amount}</strong>.</p>
              <p>Our team will verify the transaction details (UTR: ${utrNumber}) within 24 hours.</p>
              <p>You will be notified once your membership is activated.</p>`
         );
 
-        // ---------------------------------------------------------
-        // CORRECTION START: Wait for emails to send parallelly
-        // ---------------------------------------------------------
+        // --- ADMIN EMAIL CONTENT (Professional Template) ---
+        const adminEmailContent = generateEmailTemplate(
+            "New Payment Verification Required",
+            `<p>A new membership payment has been submitted and requires your verification.</p>
+             <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; background: #fafafa; border: 1px solid #eeeeee;">
+                <tr>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; width: 40%; color: #555;"><strong>User Name:</strong></td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #222; font-weight: bold;">${user.firstName} ${user.lastName}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #555;"><strong>Profile ID:</strong></td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #D32F2F; font-weight: bold;">${user.uniqueId}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #555;"><strong>Amount Paid:</strong></td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #2e7d32; font-weight: bold; font-size: 16px;">₹${amount}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #555;"><strong>UTR Number:</strong></td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #222;">${utrNumber}</td>
+                </tr>
+             </table>
+             <div style="margin-top: 30px; text-align: center;">
+                <a href="https://kalyanashobha.in/admin" style="background-color: #D32F2F; color: white; padding: 12px 25px; text-decoration: none; border-radius: 4px; font-size: 14px; font-weight: bold; display: inline-block;">Verify in Admin Dashboard</a>
+             </div>`
+        );
 
         // 1. Create the promises (start sending)
         const sendUserMail = sendMail({ 
             to: user.email, 
             subject: "Payment Submission Received", 
-            html: emailContent 
+            html: userEmailContent 
         });
 
+        // Use environment variable or fallback to your info email
+        const adminEmail = process.env.EMAIL_USER || "info@kalyanashobha.in";
         const sendAdminMail = sendMail({ 
-            to: process.env.EMAIL_USER, 
-            subject: "New Membership Payment", 
-            html: `<p>User ${user.firstName} (ID: ${user.uniqueId}) paid ${amount}. Please verify in dashboard.</p>` 
+            to: adminEmail, 
+            subject: `Action Required: Payment from ${user.uniqueId}`, 
+            html: adminEmailContent 
         });
 
         // 2. Wait for both to complete
-        // This ensures emails are actually sent before the response closes the connection
         try {
             await Promise.all([sendUserMail, sendAdminMail]);
             console.log("Payment emails sent successfully.");
@@ -1886,18 +1916,14 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
             console.error("Warning: Payment emails failed, but DB record saved.", emailError);
         }
 
-        // ---------------------------------------------------------
-        // CORRECTION END
-        // ---------------------------------------------------------
-
         res.json({ success: true, message: "Submitted successfully", status: "PendingVerification" });
 
     } catch (e) { 
-        console.error(e);
+        console.error("Payment Submission Error:", e);
         res.status(500).json({ success: false, message: "Server Error" }); 
     }
 });
-
+            
 
 // ====================================================================
 // NEW API: GET LATEST REGISTRATION PAYMENT STATUS
