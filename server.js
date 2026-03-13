@@ -4872,8 +4872,27 @@ app.post("/api/user/accept-terms", verifyUser, uploadSignature.single('digitalSi
     }
 });
 
+// Admin: Get all vendor leads
+app.get("/api/admin/vendor-leads", verifyAdmin, async (req, res) => {
+    try {
+        // Fetch leads and populate the vendor details
+        const leads = await VendorLead.find()
+            .populate('vendorId', 'vendorId businessName category contactNumber') 
+            .sort({ createdAt: -1 }); // Newest leads first
 
-                                                                               
+        res.json({ 
+            success: true, 
+            count: leads.length, 
+            data: leads 
+        });
+
+    } catch (error) {
+        console.error("Fetch Admin Leads Error:", error);
+        res.status(500).json({ success: false, message: "Server Error fetching vendor leads" });
+    }
+});
+
+                                                                             
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
