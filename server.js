@@ -2765,7 +2765,8 @@ app.post("/api/agent/register-user", verifyAgent, async (req, res) => {
             residentsIn: data.residentsIn,
             referredByAgentId: agent._id,
             referredByAgentName: agent.name,
-            referralType: 'manual' 
+            referralType: 'manual' ,
+            nri: data.nri
         });
 
         // 4. Save to DB
