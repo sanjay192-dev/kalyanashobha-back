@@ -3476,26 +3476,33 @@ app.post("/api/user/vendor-lead", async (req, res) => {
     }
 });
 
-// Admin: Get all vendor leads
-app.get("/api/admin/vendor-leads", verifyAdmin, async (req, res) => {
+// Admin: Update Vendor Lead Status
+app.put("/api/admin/vendor-leads/:id/status", verifyAdmin, async (req, res) => {
     try {
-        // Fetch leads and populate the vendor details so admin knows which business this is for
-        const leads = await VendorLead.find()
-            // ADD 'vendorId' to this list below:
-            .populate('vendorId', 'vendorId businessName category contactNumber') 
-            .sort({ createdAt: -1 }); // Newest leads first
+        const { status } = req.body;
+        const validStatuses = ['New', 'Contacted', 'Forwarded', 'Closed'];
+        
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({ success: false, message: "Invalid status" });
+        }
 
-        res.json({ 
-            success: true, 
-            count: leads.length, 
-            data: leads 
-        });
+        const lead = await VendorLead.findByIdAndUpdate(
+            req.params.id,
+            { status },
+            { new: true }
+        );
 
+        if (!lead) {
+            return res.status(404).json({ success: false, message: "Lead not found" });
+        }
+
+        res.json({ success: true, message: `Lead marked as ${status}`, data: lead });
     } catch (error) {
-        console.error("Fetch Admin Leads Error:", error);
-        res.status(500).json({ success: false, message: "Server Error fetching vendor leads" });
+        console.error("Update Lead Status Error:", error);
+        res.status(500).json({ success: false, message: "Server Error updating lead status" });
     }
 });
+
 app.post("/api/user/help-center/submit", verifyUser, uploadIssue.single("screenshot"), async (req, res) => {
     try {
         const { subject, summary } = req.body;
