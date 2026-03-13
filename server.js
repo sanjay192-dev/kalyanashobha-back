@@ -1809,33 +1809,30 @@ app.delete("/api/admin/vendors/:id", verifyAdmin, async (req, res) => {
 });
             
 
-
-
-
-
-
-// ====================================================================
-// E. PAYMENTS & INTERESTS
-// ====================================================================
-
-// 1. Submit Payment (User) - UPDATED WITH DUPLICATE CHECK & PRO EMAIL
+// 1. Submit Payment (User) - UPDATED WITH DUPLICATE & SUCCESS CHECK
 app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("screenshot"), async (req, res) => {
     try {
-        // --- NEW LOGIC START: Check for existing pending request ---
+        // --- NEW LOGIC START: Check for existing pending OR successful request ---
         const existingPayment = await PaymentRegistration.findOne({ 
             userId: req.userId, 
-            status: 'PendingVerification' 
+            status: { $in: ['PendingVerification', 'Success'] } 
         });
 
         if (existingPayment) {
-            // CLOUDINARY CLEANUP: If Multer uploaded the file, delete it to save storage space
+            // CLOUDINARY CLEANUP: Delete the uploaded file to save storage space
             if (req.file && req.file.filename) {
                 await cloudinary.uploader.destroy(req.file.filename);
             }
 
+            // Set dynamic message based on exact status
+            let msg = "You have already submitted a payment request. Please wait for admin verification.";
+            if (existingPayment.status === 'Success') {
+                msg = "Your payment has already been approved. You are already a premium member.";
+            }
+
             return res.json({ 
                 success: false, 
-                message: "You have already submitted a payment request. Please wait for admin verification.", 
+                message: msg, 
                 status: existingPayment.status,
                 alreadySubmitted: true 
             });
@@ -1923,7 +1920,10 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
         res.status(500).json({ success: false, message: "Server Error" }); 
     }
 });
-            
+                             
+
+
+
 
 // ====================================================================
 // NEW API: GET LATEST REGISTRATION PAYMENT STATUS
