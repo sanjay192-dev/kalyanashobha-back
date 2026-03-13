@@ -1677,7 +1677,7 @@ app.post("/api/admin/agents", verifyAdmin, async (req, res) => {
              <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; background: #fafafa; border: 1px solid #eeeeee;">
                 <tr>
                     <td style="padding: 12px; border-bottom: 1px solid #eeeeee; width: 40%; color: #555;"><strong>Login URL:</strong></td>
-                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee;"><a href="https://kalyanashobha.in/agent" style="color: #D32F2F; text-decoration: none; font-weight: bold;">kalyanashobha.in/agent</a></td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee;"><a href="https://kalyanashobha.in/agent/login" style="color: #D32F2F; text-decoration: none; font-weight: bold;">kalyanashobha.in/agent</a></td>
                 </tr>
                 <tr>
                     <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #555;"><strong>Email ID:</strong></td>
@@ -1694,7 +1694,7 @@ app.post("/api/admin/agents", verifyAdmin, async (req, res) => {
              </table>
              <p style="margin-top: 20px;">Please keep these credentials safe and do not share them with anyone.</p>
              <div style="margin-top: 30px; text-align: center;">
-                <a href="https://kalyanashobha.in/agent" style="background-color: #D32F2F; color: white; padding: 12px 25px; text-decoration: none; border-radius: 4px; font-size: 14px; font-weight: bold; display: inline-block;">Login to Dashboard</a>
+                <a href="https://www.kalyanashobha.in/agent/login" style="background-color: #D32F2F; color: white; padding: 12px 25px; text-decoration: none; border-radius: 4px; font-size: 14px; font-weight: bold; display: inline-block;">Login to Dashboard</a>
              </div>`
         );
 
