@@ -50,6 +50,7 @@ const UserSchema = new mongoose.Schema({
 
   jobRole: { type: String },
   companyName: { type: String },
+nri: { type: String, enum: ['Yes', 'No'] },
 
   // --- I. Contact Info & AUTH ---
   email: { type: String, unique: true, required: true },
@@ -105,7 +106,7 @@ familyType: { type: String },
     noOfBrothersMarried: { type: Number },
     noOfSisters: { type: Number },
     noOfSistersMarried: { type: Number },
-    nri: { type: String, enum: ['Yes', 'No'] }
+    
   },
 
   createdAt: { type: Date, default: Date.now }
