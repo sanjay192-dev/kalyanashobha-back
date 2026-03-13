@@ -4819,6 +4819,50 @@ app.put("/api/admin/premium-requests/:id/status", verifyAdmin, async (req, res) 
     }
 });
 
+// ====================================================================
+// POST-LOGIN: ACCEPT TERMS & UPLOAD SIGNATURE (For Agent Referrals)
+// ====================================================================
+app.post("/api/user/accept-terms", verifyUser, uploadSignature.single('digitalSignature'), async (req, res) => {
+    try {
+        // 1. Ensure the file was uploaded
+        if (!req.file) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Digital Signature file is required." 
+            });
+        }
+
+        // 2. Capture IP Address for legal compliance
+        const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+        // 3. Update the User document
+        const updatedUser = await User.findByIdAndUpdate(
+            req.userId,
+            {
+                $set: {
+                    digitalSignature: req.file.path,
+                    termsAcceptedAt: new Date(),
+                    termsAcceptedIP: clientIp
+                }
+            },
+            { new: true }
+        ).select("-password -otp");
+
+        if (!updatedUser) {
+            return res.status(404).json({ success: false, message: "User not found." });
+        }
+
+        res.json({ 
+            success: true, 
+            message: "Terms accepted and signature saved successfully.", 
+            user: updatedUser 
+        });
+
+    } catch (e) {
+        console.error("Accept Terms Error:", e);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
 
 
                                                                                
