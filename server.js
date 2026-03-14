@@ -1965,9 +1965,9 @@ app.post("/api/payment/registration/submit", verifyUser, uploadPayment.single("s
         });
 
         // Use environment variable or fallback to your info email
-        const adminEmail = process.env.EMAIL_USER || "info@kalyanashobha.in";
+        
         const sendAdminMail = sendMail({ 
-            to: adminEmail, 
+            to: EMAIL_USER,
             subject: `Action Required: Payment from ${user.uniqueId}`, 
             html: adminEmailContent 
         });
@@ -2289,7 +2289,7 @@ app.post("/api/interest/submit-proof", verifyUser, uploadPayment.single("screens
         });
 
         const sendAdminMail = sendMail({ 
-            to: process.env.EMAIL_USER, 
+            to: EMAIL_USER,
             subject: "Admin Alert: New Interest Verification Required", 
             html: adminEmailContent 
         });
@@ -3526,7 +3526,7 @@ app.post("/api/user/vendor-lead", async (req, res) => {
 
         // Send to the admin email defined in your environment
         await sendMail({ 
-            to: process.env.EMAIL_USER || "adepusanjay444@gmail.com", 
+            to: EMAIL_USER, 
             subject: `New Lead: ${vendorName}`, 
             html: adminAlertContent 
         });
@@ -3605,7 +3605,7 @@ app.post("/api/user/help-center/submit", verifyUser, uploadIssue.single("screens
 
         // Send to your admin email
         await sendMail({ 
-            to: process.env.EMAIL_USER || "adepusanjay444@gmail.com", 
+            to: EMAIL_USER,
             subject: `New Issue Reported: ${subject}`, 
             html: adminEmailContent 
         });
@@ -3716,7 +3716,7 @@ app.post("/api/interest/send", verifyUser, async (req, res) => {
              <p>Please log in to the Admin Dashboard to review and forward the request to the receiver.</p>`
         );
 
-        sendMail({ to: process.env.EMAIL_USER, subject: "Admin Alert: New Interest Phase 1", html: adminEmailContent });
+        sendMail({ to: EMAIL_USER, subject: "Admin Alert: New Interest Phase 1", html: adminEmailContent });
 
         res.json({ success: true, message: "Interest request sent to Admin for approval." });
 
@@ -4836,7 +4836,7 @@ app.post("/api/user/premium-click-alert", verifyUser, async (req, res) => {
 
         // Send Email to Admin
         await sendMail({ 
-            to: process.env.EMAIL_USER || "adepusanjay444@gmail.com", 
+            to: EMAIL_USER,
             subject: `Premium Request: ${user.firstName} (${user.uniqueId})`, 
             html: adminAlertContent 
         });
