@@ -148,7 +148,7 @@ const testimonialStorage = new CloudinaryStorage({
 });
 const uploadTestimonial = multer({ storage: testimonialStorage });
 
-const EMAIL_USER = "support@kalyanashobha.in";
+const EMAIL_USER = "kalyanashobhamatrimony@gmail.com";
 
 
 
