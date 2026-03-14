@@ -1037,13 +1037,36 @@ app.post("/api/auth/reset-password", async (req, res) => {
 // USER PROFILE (View & Update)
 // ====================================================================
 
+
 // 1. Get My Profile Data
 app.get("/api/user/my-profile", verifyUser, async (req, res) => {
     try {
-        const user = await User.findById(req.userId).select("-password -otp");
+        // We add .populate() to automatically fetch the Agent document connected to referredByAgentId
+        const user = await User.findById(req.userId)
+            .select("-password -otp")
+            .populate("referredByAgentId", "name agentCode email mobile"); // Fetch specific agent fields
+
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        // --- THE LOGIC YOU REQUESTED ---
+        let agentInfo = null;
         
-        res.json({ success: true, user });
+        // Check if the user has an agent attached
+        if (user.referredByAgentId) {
+            agentInfo = {
+                id: user.referredByAgentId._id,
+                name: user.referredByAgentId.name,
+                agentCode: user.referredByAgentId.agentCode
+            };
+        }
+        // -------------------------------
+
+        // Send the user data AND the formatted agent info back to the frontend
+        res.json({ 
+            success: true, 
+            user: user,
+            referredBy: agentInfo // Will be null if no agent, or an object with ID and Name if referred
+        });
     } catch (e) {
         res.status(500).json({ success: false, message: "Server Error" });
     }
