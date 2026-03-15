@@ -683,14 +683,15 @@ app.post("/api/admin/change-password", verifyAdmin, async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
+
 // 1. Utility function to prevent regex crashes
 const escapeRegExp = (string) => {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
 
-
-
-// Replace the standardCategories array inside checkAndStageNewMasterData with this:
+// 2. The targeted, concurrent helper function
+const checkAndStageNewMasterData = async (userId, data) => {
+    const checkPromises = [];
 
     // --- 1. CAPTURE EXACT CATEGORIES WITH PARENTS ---
     const standardCategories = [
@@ -734,6 +735,48 @@ const escapeRegExp = (string) => {
         checkPromises.push(promise);
     }
 
+    // --- 2. COMMUNITY & SUB-COMMUNITY ---
+    if (data.community && data.community !== 'null' && data.community !== 'undefined' && data.community.trim() !== '') {
+        const commVal = data.community.trim();
+        const safeCommRegex = escapeRegExp(commVal);
+
+        const commPromise = Community.findOne({ name: new RegExp(`^${safeCommRegex}$`, 'i') })
+            .then(async (commExists) => {
+                // Check Community
+                if (!commExists) {
+                    await PendingMasterData.updateOne(
+                        { category: 'Community', value: commVal },
+                        { $setOnInsert: { status: 'Pending', submittedBy: userId } },
+                        { upsert: true }
+                    );
+                }
+
+                // Check SubCommunity
+                if (data.subCommunity && data.subCommunity !== 'null' && data.subCommunity !== 'undefined' && data.subCommunity.trim() !== '') {
+                    const subVal = data.subCommunity.trim();
+                    let subExists = false;
+
+                    if (commExists && commExists.subCommunities) {
+                        subExists = commExists.subCommunities.some(sub => sub.toLowerCase() === subVal.toLowerCase());
+                    }
+
+                    if (!subExists) {
+                        await PendingMasterData.updateOne(
+                            { category: 'SubCommunity', value: subVal, parentValue: commVal },
+                            { $setOnInsert: { status: 'Pending', submittedBy: userId } },
+                            { upsert: true }
+                        );
+                    }
+                }
+            })
+            .catch(err => console.error(`Failed to stage Community data:`, err.message));
+
+        checkPromises.push(commPromise);
+    }
+
+    // --- 3. EXECUTE ALL AT ONCE ---
+    await Promise.allSettled(checkPromises);
+};
 
 
 // 3. REGISTER ROUTE (Updated to await the master data check)
