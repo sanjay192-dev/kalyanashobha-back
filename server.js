@@ -4994,8 +4994,87 @@ app.get("/api/admin/vendor-leads", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error fetching vendor leads" });
     }
 });
+// Get all Moderators
+app.get("/api/admin/moderators", verifyAdmin, async (req, res) => {
+    try {
+        // Security Check: Only SuperAdmin can view the moderator list
+        const caller = await Admin.findById(req.adminId);
+        if (caller.role !== 'SuperAdmin') {
+            return res.status(403).json({ success: false, message: "Access Denied: Only SuperAdmins can view moderators" });
+        }
 
-                                                                             
+        const moderators = await Admin.find({ role: 'Moderator' })
+            .select('-password') // Hide passwords
+            .sort({ createdAt: -1 });
+
+        res.json({ success: true, count: moderators.length, data: moderators });
+
+    } catch (e) {
+        console.error("Fetch Moderators Error:", e);
+        res.status(500).json({ success: false, message: "Server Error fetching moderators" });
+    }
+});
+
+// Edit a Moderator
+app.put("/api/admin/moderators/:id", verifyAdmin, async (req, res) => {
+    try {
+        // Security Check: Only SuperAdmin can edit moderators
+        const caller = await Admin.findById(req.adminId);
+        if (caller.role !== 'SuperAdmin') {
+            return res.status(403).json({ success: false, message: "Access Denied: Only SuperAdmins can edit moderators" });
+        }
+
+        const { username, email, permissions, password } = req.body;
+        const updateData = { username, email, permissions };
+
+        // If a new password was provided in the edit form, hash it
+        if (password && password.trim() !== "") {
+            const salt = await bcrypt.genSalt(10);
+            updateData.password = await bcrypt.hash(password, salt);
+        }
+
+        const updatedModerator = await Admin.findByIdAndUpdate(
+            req.params.id,
+            { $set: updateData },
+            { new: true } // Return the updated document
+        ).select('-password');
+
+        if (!updatedModerator) {
+            return res.status(404).json({ success: false, message: "Moderator not found" });
+        }
+
+        res.json({ success: true, message: "Moderator updated successfully", data: updatedModerator });
+
+    } catch (e) {
+        console.error("Edit Moderator Error:", e);
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+
+   // Delete a Moderator
+app.delete("/api/admin/moderators/:id", verifyAdmin, async (req, res) => {
+    try {
+        // Security Check: Only SuperAdmin can delete moderators
+        const caller = await Admin.findById(req.adminId);
+        if (caller.role !== 'SuperAdmin') {
+            return res.status(403).json({ success: false, message: "Access Denied: Only SuperAdmins can delete moderators" });
+        }
+
+        const deletedModerator = await Admin.findByIdAndDelete(req.params.id);
+
+        if (!deletedModerator) {
+            return res.status(404).json({ success: false, message: "Moderator not found" });
+        }
+
+        res.json({ success: true, message: "Moderator deleted successfully" });
+
+    } catch (e) {
+        console.error("Delete Moderator Error:", e);
+        res.status(500).json({ success: false, message: "Server Error deleting moderator" });
+    }
+});
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
