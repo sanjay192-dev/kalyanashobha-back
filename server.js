@@ -688,18 +688,18 @@ const escapeRegExp = (string) => {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
 
-// 2. The targeted, concurrent helper function
-const checkAndStageNewMasterData = async (userId, data) => {
-    const checkPromises = [];
 
-    // --- 1. ONLY THE EXACT CATEGORIES YOU REQUESTED ---
+
+// Replace the standardCategories array inside checkAndStageNewMasterData with this:
+
+    // --- 1. CAPTURE EXACT CATEGORIES WITH PARENTS ---
     const standardCategories = [
-        { category: 'Country', value: data.country },
-        { category: 'State', value: data.state },
-        { category: 'City', value: data.city },
-        { category: 'Education', value: data.highestQualification },
-        { category: 'Designation', value: data.jobRole },
-        { category: 'Gothra', value: data.gothra }
+        { category: 'Country', value: data.country, parentValue: null },
+        { category: 'State', value: data.state, parentValue: data.country }, // State belongs to Country
+        { category: 'City', value: data.city, parentValue: data.state },     // City belongs to State
+        { category: 'Education', value: data.highestQualification, parentValue: null },
+        { category: 'Designation', value: data.jobRole, parentValue: null },
+        { category: 'Gothra', value: data.gothra, parentValue: null }
     ];
 
     for (const item of standardCategories) {
@@ -710,12 +710,20 @@ const checkAndStageNewMasterData = async (userId, data) => {
         const val = item.value.trim();
         const safeRegex = escapeRegExp(val);
 
+        // Build query to check if it exists (include parent if applicable)
+        let query = { category: item.category, name: new RegExp(`^${safeRegex}$`, 'i') };
+        if (item.parentValue) {
+            query.parentValue = new RegExp(`^${escapeRegExp(item.parentValue.trim())}$`, 'i');
+        } else {
+            query.parentValue = null;
+        }
+
         // Process each field concurrently
-        const promise = MasterData.findOne({ category: item.category, name: new RegExp(`^${safeRegex}$`, 'i') })
+        const promise = MasterData.findOne(query)
             .then(async (exists) => {
                 if (!exists) {
                     await PendingMasterData.updateOne(
-                        { category: item.category, value: val },
+                        { category: item.category, value: val, parentValue: item.parentValue ? item.parentValue.trim() : null },
                         { $setOnInsert: { status: 'Pending', submittedBy: userId } },
                         { upsert: true }
                     );
@@ -725,50 +733,6 @@ const checkAndStageNewMasterData = async (userId, data) => {
 
         checkPromises.push(promise);
     }
-
-    // --- 2. COMMUNITY & SUB-COMMUNITY ---
-    if (data.community && data.community !== 'null' && data.community !== 'undefined' && data.community.trim() !== '') {
-        const commVal = data.community.trim();
-        const safeCommRegex = escapeRegExp(commVal);
-
-        const commPromise = Community.findOne({ name: new RegExp(`^${safeCommRegex}$`, 'i') })
-            .then(async (commExists) => {
-                // Check Community
-                if (!commExists) {
-                    await PendingMasterData.updateOne(
-                        { category: 'Community', value: commVal },
-                        { $setOnInsert: { status: 'Pending', submittedBy: userId } },
-                        { upsert: true }
-                    );
-                }
-
-                // Check SubCommunity
-                if (data.subCommunity && data.subCommunity !== 'null' && data.subCommunity !== 'undefined' && data.subCommunity.trim() !== '') {
-                    const subVal = data.subCommunity.trim();
-                    let subExists = false;
-                    
-                    if (commExists && commExists.subCommunities) {
-                        subExists = commExists.subCommunities.some(sub => sub.toLowerCase() === subVal.toLowerCase());
-                    }
-
-                    if (!subExists) {
-                        await PendingMasterData.updateOne(
-                            { category: 'SubCommunity', value: subVal, parentValue: commVal },
-                            { $setOnInsert: { status: 'Pending', submittedBy: userId } },
-                            { upsert: true }
-                        );
-                    }
-                }
-            })
-            .catch(err => console.error(`Failed to stage Community data:`, err.message));
-
-        checkPromises.push(commPromise);
-    }
-
-    // --- 3. EXECUTE ALL AT ONCE ---
-    await Promise.allSettled(checkPromises);
-};
-
 
 
 
@@ -3799,13 +3763,26 @@ app.post("/api/admin/interest/process", verifyAdmin, async (req, res) => {
 // ====================================================================
 // UNIVERSAL MASTER DATA APIs (State, Education, Occupation, etc.)
 // ====================================================================
-
-// 1. PUBLIC: Get options for a specific category (e.g., /api/public/master-data/State)
+// 1. PUBLIC: Get options for a specific category (e.g., /api/public/master-data/State?parent=India)
 app.get("/api/public/master-data/:category", async (req, res) => {
     try {
         const { category } = req.params;
-        // ADD .sort({ order: 1 }) HERE
-        const data = await MasterData.find({ category }).sort({ order: 1 }).select('name subItems order').lean();
+        const { parent } = req.query; // Capture the parent query parameter
+
+        let query = { category };
+
+        // If a parent is requested, filter by it using a case-insensitive regex
+        if (parent) {
+            query.parentValue = { $regex: new RegExp(`^${escapeRegExp(parent)}$`, 'i') };
+        } 
+        // Optional strictly hierarchical rule: 
+        // If they ask for City/State but don't provide a parent, you could return an empty array here to force frontend discipline, 
+        // but for now, we'll let it fetch all if no parent is provided.
+
+        const data = await MasterData.find(query)
+            .sort({ order: 1 })
+            .select('name subItems parentValue order')
+            .lean();
 
         res.json({ success: true, count: data.length, data });
     } catch (e) {
@@ -3813,21 +3790,25 @@ app.get("/api/public/master-data/:category", async (req, res) => {
     }
 });
 
+
 // 2. ADMIN: Add a generic category item (Handles single, bulk, and sub-items)
 app.post("/api/admin/master-data", verifyAdmin, async (req, res) => {
     try {
-        const { category, name, subItems } = req.body;
+        // ADD parentValue to destructured body
+        const { category, name, subItems, parentValue } = req.body;
 
         if (!category || !name) {
             return res.status(400).json({ success: false, message: "Category and Name are required" });
         }
 
-        // SCENARIO 1: Bulk Add (if 'name' is an array like ["B.Tech", "M.Tech"])
+        const safeParent = parentValue ? parentValue.trim() : null;
+
+        // SCENARIO 1: Bulk Add
         if (Array.isArray(name)) {
             const operations = name.map(val => ({
                 updateOne: {
-                    filter: { category, name: val.trim() },
-                    update: { $setOnInsert: { category, name: val.trim(), subItems: [] } },
+                    filter: { category, name: val.trim(), parentValue: safeParent },
+                    update: { $setOnInsert: { category, name: val.trim(), parentValue: safeParent, subItems: [] } },
                     upsert: true
                 }
             }));
@@ -3844,9 +3825,9 @@ app.post("/api/admin/master-data", verifyAdmin, async (req, res) => {
         }
 
         const updatedData = await MasterData.findOneAndUpdate(
-            { category, name: itemName },
+            { category, name: itemName, parentValue: safeParent },
             { 
-                $setOnInsert: { category, name: itemName },
+                $setOnInsert: { category, name: itemName, parentValue: safeParent },
                 $addToSet: { subItems: { $each: subItemsToAdd } } 
             },
             { new: true, upsert: true }
@@ -3857,6 +3838,7 @@ app.post("/api/admin/master-data", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: e.message });
     }
 });
+
 
 
 // 2. The concurrent helper for Extra Details
