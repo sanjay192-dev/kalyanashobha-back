@@ -4069,11 +4069,21 @@ app.post("/api/admin/pending-data/action", verifyAdmin, async (req, res) => {
                     { upsert: true }
                 );
             } 
-            // --- C. Handle Standard MasterData ---
+            // --- C. Handle Standard MasterData (UPDATED FOR HIERARCHY) ---
             else {
                 await MasterData.findOneAndUpdate(
-                    { category: category, name: new RegExp(`^${value}$`, 'i') },
-                    { $setOnInsert: { category: category, name: value } },
+                    { 
+                        category: category, 
+                        name: new RegExp(`^${value}$`, 'i'),
+                        parentValue: parentValue || null // Match exactly to the parent
+                    },
+                    { 
+                        $setOnInsert: { 
+                            category: category, 
+                            name: value,
+                            parentValue: parentValue || null // Save the parent link
+                        } 
+                    },
                     { upsert: true }
                 );
             }
@@ -4093,6 +4103,7 @@ app.post("/api/admin/pending-data/action", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
+
         
 // ====================================================================
 // DYNAMIC PAGE CONTENT (Terms, Refund, About)
