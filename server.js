@@ -3848,10 +3848,15 @@ app.post("/api/admin/master-data", verifyAdmin, async (req, res) => {
 
         // SCENARIO 1: Bulk Add
         if (Array.isArray(name)) {
-            const operations = name.map(val => ({
+            // Added 'index' to the map function
+            const operations = name.map((val, index) => ({
                 updateOne: {
                     filter: { category, name: val.trim(), parentValue: safeParent },
-                    update: { $setOnInsert: { category, name: val.trim(), parentValue: safeParent, subItems: [] } },
+                    update: { 
+                        $setOnInsert: { category, name: val.trim(), parentValue: safeParent, subItems: [] },
+                        // Force update the order field based on the array position
+                        $set: { order: index } 
+                    },
                     upsert: true
                 }
             }));
@@ -3881,6 +3886,7 @@ app.post("/api/admin/master-data", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: e.message });
     }
 });
+
 
 
 
