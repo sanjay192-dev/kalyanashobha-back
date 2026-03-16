@@ -4614,12 +4614,56 @@ app.post("/api/admin/create-moderator", verifyAdmin, async (req, res) => {
         });
 
         await newModerator.save();
-        res.json({ success: true, message: "Moderator created successfully" });
+
+        // --- NEW: SEND WELCOME EMAIL TO MODERATOR ---
+        const moderatorEmailContent = generateEmailTemplate(
+            "Welcome to KalyanaShobha Admin Portal",
+            `<p>Dear ${username},</p>
+             <p>Your moderator account has been successfully created by the Super Admin.</p>
+             <p>Here are your official login credentials:</p>
+             <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; background: #fafafa; border: 1px solid #eeeeee;">
+                <tr>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; width: 40%; color: #555;"><strong>Login URL:</strong></td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee;"><a href="https://kalyanashobha.in/admin" style="color: #D32F2F; text-decoration: none; font-weight: bold;">kalyanashobha.in/admin</a></td>
+                </tr>
+                <tr>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #555;"><strong>Email ID:</strong></td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #222; font-weight: bold;">${email}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #555;"><strong>Password:</strong></td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #222; font-weight: bold;">${password}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #555;"><strong>Permissions:</strong></td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #222; font-weight: bold;">${permissions ? permissions.join(', ') : 'None assigned yet'}</td>
+                </tr>
+             </table>
+             <p style="margin-top: 20px;">Please keep these credentials safe and do not share them with anyone. We recommend changing your password after your first login.</p>
+             <div style="margin-top: 30px; text-align: center;">
+                <a href="https://kalyanashobha.in/admin" style="background-color: #D32F2F; color: white; padding: 12px 25px; text-decoration: none; border-radius: 4px; font-size: 14px; font-weight: bold; display: inline-block;">Login to Dashboard</a>
+             </div>`
+        );
+
+        // Send the email but don't stop the request if it fails
+        try {
+            await sendMail({ 
+                to: email, 
+                subject: "Your Moderator Portal Login Credentials", 
+                html: moderatorEmailContent 
+            });
+            console.log("Moderator welcome email sent.");
+        } catch (mailErr) {
+            console.error("Failed to send moderator email:", mailErr);
+        }
+
+        res.json({ success: true, message: "Moderator created and email sent successfully" });
 
     } catch (e) {
         res.status(500).json({ success: false, message: e.message });
     }
 });
+
 
 // ====================================================================
 // ADMIN: EDIT USER PROFILE & PHOTOS (NOW WITH MASTER DATA STAGING)
