@@ -523,7 +523,9 @@ app.post("/api/agent/auth/login-verify", async (req, res) => {
     try {
         const { email, otp } = req.body;
 
-        const otpRecord = await Otp.findOne({ email, otp });
+        const cleanOtp = String(otp).trim();
+const otpRecord = await Otp.findOne({ email, otp: cleanOtp });
+        
 
         if (otpRecord) {
             const agent = await Agent.findOne({ email });
@@ -636,7 +638,8 @@ app.post("/api/admin/auth/login-init", async (req, res) => {
 app.post("/api/admin/auth/login-verify", async (req, res) => {
     try {
         const { email, otp } = req.body;
-        const otpRecord = await Otp.findOne({ email, otp });
+        const cleanOtp = String(otp).trim();
+const otpRecord = await Otp.findOne({ email, otp: cleanOtp });
 
         if (otpRecord) {
             const admin = await Admin.findOne({ email });
@@ -1259,7 +1262,9 @@ app.post("/api/auth/login-verify", async (req, res) => {
         const { email, otp } = req.body;
         
         // Find the OTP in the database
-        const otpRecord = await Otp.findOne({ email, otp });
+        const cleanOtp = String(otp).trim();
+const otpRecord = await Otp.findOne({ email, otp: cleanOtp });
+
 
         if (otpRecord) {
             const user = await User.findOne({ email });
