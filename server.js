@@ -495,7 +495,7 @@ app.post("/api/agent/auth/login-init", async (req, res) => {
 
         // Generate OTP and save to MongoDB
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        await Otp.deleteMany({ email }); // Clear old OTPs
+        
         await Otp.create({ email, otp: otpCode });
 
         const emailContent = generateEmailTemplate(
@@ -605,7 +605,7 @@ app.post("/api/admin/auth/login-init", async (req, res) => {
 
         // Generate OTP and save to MongoDB
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        await Otp.deleteMany({ email });
+        
         await Otp.create({ email, otp: otpCode });
 
         const emailContent = generateEmailTemplate(
@@ -1228,8 +1228,6 @@ app.post("/api/auth/login-init", async (req, res) => {
         // Generate OTP
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-        // Delete any existing OTPs for this email to prevent duplicates
-        await Otp.deleteMany({ email });
 
         // Save new OTP to MongoDB
         await Otp.create({ email, otp: otpCode });
