@@ -1800,27 +1800,26 @@ app.delete("/api/admin/agents/:id", verifyAdmin, async (req, res) => {
 // ADMIN: VENDOR MANAGEMENT (POST, GET, DELETE)
 // ====================================================================
 
-// 1. POST: Create a new Vendor (Handles single, multiple, or no images)
+// 1. POST: Create a new Vendor by Admin (Auto-Approved)
 app.post("/api/admin/vendors", verifyAdmin, uploadVendor.array("images", 5), async (req, res) => {
   try {
-    // Safely check if images were uploaded. If yes, map to their Cloudinary URLs.
     const images = req.files && req.files.length > 0 
       ? req.files.map(file => file.path) 
       : [];
 
-    const { businessName, category, description, contactNumber, priceRange } = req.body;
+    // Added email to the destructured body
+    const { businessName, email, category, description, contactNumber, priceRange } = req.body;
 
-    // Basic Validation
-    if (!businessName || !category || !contactNumber) {
-      return res.status(400).json({ success: false, message: "Business Name, Category, and Contact Number are required." });
+    if (!businessName || !email || !category || !contactNumber) {
+      return res.status(400).json({ success: false, message: "Business Name, Email, Category, and Contact Number are required." });
     }
 
-    // --- NEW: Generate Unique Vendor ID ---
     const vendorId = await generateVendorId();
 
     const vendor = new Vendor({
-      vendorId, // <--- Save the generated ID here
+      vendorId, 
       businessName,
+      email, // Save email
       category,
       description,
       contactNumber,
@@ -1836,6 +1835,7 @@ app.post("/api/admin/vendors", verifyAdmin, uploadVendor.array("images", 5), asy
     res.status(500).json({ success: false, message: error.message || "Failed to create vendor" }); 
   }
 });
+
 
 
 // 2. GET: Fetch all Vendors for Admin Dashboard
