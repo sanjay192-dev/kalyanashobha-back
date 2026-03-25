@@ -5128,6 +5128,151 @@ app.delete("/api/admin/moderators/:id", verifyAdmin, async (req, res) => {
     }
 });
 
+// ====================================================================
+// VENDOR SELF-REGISTRATION (PUBLIC)
+// ====================================================================
 
+// Vendor submits their details for approval
+app.post("/api/vendor/register", uploadVendor.array("images", 5), async (req, res) => {
+    try {
+        const { businessName, email, category, description, contactNumber, priceRange } = req.body;
+
+        if (!businessName || !email || !category || !contactNumber) {
+            return res.status(400).json({ success: false, message: "Business Name, Email, Category, and Contact Number are required." });
+        }
+
+        // Check if a vendor with this email already exists
+        const existingVendor = await Vendor.findOne({ email });
+        if (existingVendor) {
+            return res.status(400).json({ success: false, message: "A vendor with this email already exists." });
+        }
+
+        const images = req.files && req.files.length > 0 ? req.files.map(file => file.path) : [];
+        const vendorId = await generateVendorId();
+
+        const vendor = new Vendor({
+            vendorId,
+            businessName,
+            email,
+            category,
+            description,
+            contactNumber,
+            priceRange,
+            images,
+            isApproved: false // Explicitly false so admin has to review
+        });
+
+        await vendor.save();
+
+        // Email to the Vendor
+        const vendorEmailContent = generateEmailTemplate(
+            "Registration Received",
+            `<p>Dear ${businessName} Team,</p>
+             <p>Thank you for registering on KalyanaShobha. We have received your details.</p>
+             <p>Our admin team is currently reviewing your application. You will be notified once your profile is approved and live on our platform.</p>`
+        );
+
+        // Email Alert to Admin
+        const adminAlertContent = generateEmailTemplate(
+            "New Vendor Registration Request",
+            `<p>A new vendor has submitted a registration request.</p>
+             <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px;">
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; width: 40%; color: #666;"><strong>Business Name:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${businessName}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Category:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${category}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Contact:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${contactNumber} / ${email}</td></tr>
+             </table>
+             <div style="margin-top: 20px; text-align: center;">
+                <a href="https://kalyanashobha.in/admin" style="background-color: #D32F2F; color: white; padding: 12px 25px; text-decoration: none; border-radius: 4px; font-weight: bold;">Review in Dashboard</a>
+             </div>`
+        );
+
+        // Send Emails asynchronously
+        sendMail({ to: email, subject: "Vendor Registration Received", html: vendorEmailContent }).catch(e => console.error(e));
+        sendMail({ to: EMAIL_USER, subject: `New Vendor Request: ${businessName}`, html: adminAlertContent }).catch(e => console.error(e));
+
+        res.json({ success: true, message: "Registration submitted successfully. Pending admin approval." });
+
+    } catch (error) {
+        console.error("Vendor Registration Error:", error);
+        res.status(500).json({ success: false, message: "Server Error during registration" });
+    }
+});
+
+
+// ====================================================================
+// ADMIN VENDOR APPROVAL WORKFLOW
+// ====================================================================
+
+// 1. GET: Fetch only pending vendor requests
+app.get("/api/admin/vendor-requests", verifyAdmin, async (req, res) => {
+    try {
+        const pendingVendors = await Vendor.find({ isApproved: false }).sort({ createdAt: -1 });
+        res.json({ success: true, count: pendingVendors.length, vendors: pendingVendors });
+    } catch (error) {
+        console.error("Fetch Pending Vendors Error:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch vendor requests" });
+    }
+});
+
+// 2. POST: Approve or Reject a vendor
+app.post("/api/admin/vendors/action", verifyAdmin, async (req, res) => {
+    try {
+        const { vendorObjectId, action, rejectionReason } = req.body; // action should be 'approve' or 'reject'
+
+        const vendor = await Vendor.findById(vendorObjectId);
+        if (!vendor) return res.status(404).json({ success: false, message: "Vendor not found" });
+
+        if (action === 'approve') {
+            vendor.isApproved = true;
+            await vendor.save();
+
+            const approvalEmail = generateEmailTemplate(
+                "Vendor Profile Approved!",
+                `<p>Dear ${vendor.businessName} Team,</p>
+                 <p>Congratulations! Your vendor profile has been approved and is now visible to thousands of users on KalyanaShobha.</p>
+                 <p>Users can now view your details and contact you for business inquiries.</p>`
+            );
+
+            await sendMail({ to: vendor.email, subject: "Your KalyanaShobha Vendor Profile is Live!", html: approvalEmail });
+            return res.json({ success: true, message: "Vendor approved successfully." });
+
+        } else if (action === 'reject') {
+            // CLOUDINARY CLEANUP: If rejected, we must delete their images to save space
+            if (vendor.images && vendor.images.length > 0) {
+                const deletePromises = vendor.images.map(imageUrl => {
+                    const parts = imageUrl.split('/');
+                    const fileWithExt = parts.pop(); 
+                    const folder = parts.pop(); 
+                    const publicId = `${folder}/${fileWithExt.split('.')[0]}`; 
+                    return cloudinary.uploader.destroy(publicId);
+                });
+                await Promise.all(deletePromises);
+            }
+
+            // Delete the vendor from DB entirely
+            await Vendor.findByIdAndDelete(vendorObjectId);
+
+            const rejectionEmail = generateEmailTemplate(
+                "Vendor Registration Update",
+                `<p>Dear ${vendor.businessName} Team,</p>
+                 <p>We have reviewed your registration request for KalyanaShobha.</p>
+                 <p>Unfortunately, we are unable to approve your profile at this time.</p>
+                 ${rejectionReason ? `<p><strong>Reason:</strong> ${rejectionReason}</p>` : ""}
+                 <p>If you believe this is a mistake, please reach out to our support team.</p>`
+            );
+
+            await sendMail({ to: vendor.email, subject: "KalyanaShobha Registration Update", html: rejectionEmail });
+            return res.json({ success: true, message: "Vendor rejected and deleted successfully." });
+
+        } else {
+            return res.status(400).json({ success: false, message: "Invalid action. Use 'approve' or 'reject'." });
+        }
+
+    } catch (error) {
+        console.error("Vendor Action Error:", error);
+        res.status(500).json({ success: false, message: "Server Error processing vendor action" });
+    }
+});
+                                                  
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
