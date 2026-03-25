@@ -3558,7 +3558,7 @@ app.post("/api/user/vendor-lead", async (req, res) => {
                     <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; width: 30%; color: #666;"><strong>Customer Name:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${name}</td></tr>
                     <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Phone:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${phone}</td></tr>
                     <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Email:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${email || 'N/A'}</td></tr>
-                    <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Event Date:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${weddingDate || 'N/A'}</td></tr>
+                    
                     
                     <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Message:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${message}</td></tr>
                  </table>
