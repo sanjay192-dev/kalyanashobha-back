@@ -3498,6 +3498,7 @@ app.get("/api/public/get-sub-community/:name", async (req, res) => {
     }
 });
 
+
 // Submit a new lead for a vendor
 app.post("/api/user/vendor-lead", async (req, res) => {
     try {
@@ -3514,17 +3515,19 @@ app.post("/api/user/vendor-lead", async (req, res) => {
         });
         await newLead.save();
 
-        // 3. Fetch Vendor Details (To know who the lead is for)
+        // 3. Fetch Vendor Details (To get their Name AND Email)
         const vendor = await Vendor.findById(vendorId);
         const vendorName = vendor ? vendor.businessName : "Unknown Vendor";
+        const vendorEmail = vendor ? vendor.email : null; // Get the vendor's email
 
-        // 4. Send Instant Email Alert to Admin
+        // 4. Prepare Admin Alert Content
         const adminAlertContent = generateEmailTemplate(
             "New Premium Vendor Lead",
             `<p>A new lead has been submitted for <strong>${vendorName}</strong>.</p>
              <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px;">
                 <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; width: 30%; color: #666;"><strong>Name:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${name}</td></tr>
                 <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Phone:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${phone}</td></tr>
+                <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Email:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${email || 'N/A'}</td></tr>
                 <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Date:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${weddingDate || 'N/A'}</td></tr>
                 <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Guests:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${guestCount || 'N/A'}</td></tr>
                 <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Message:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${message}</td></tr>
@@ -3534,14 +3537,53 @@ app.post("/api/user/vendor-lead", async (req, res) => {
              </div>`
         );
 
-        // Send to the admin email defined in your environment
-        await sendMail({ 
-            to: EMAIL_USER, 
-            subject: `New Lead: ${vendorName}`, 
-            html: adminAlertContent 
-        });
+        const emailPromises = [];
 
-        // 5. Send Success Response to Frontend
+        // Add Admin Email to the queue
+        emailPromises.push(
+            sendMail({ 
+                to: EMAIL_USER, 
+                subject: `New Lead: ${vendorName}`, 
+                html: adminAlertContent 
+            })
+        );
+
+        // 5. Prepare and queue Vendor Email Content (If vendor has an email)
+        if (vendorEmail) {
+            const vendorAlertContent = generateEmailTemplate(
+                "New Customer Inquiry - KalyanaShobha",
+                `<p>Hello <strong>${vendorName}</strong> Team,</p>
+                 <p>You have received a new business inquiry through KalyanaShobha. Here are the customer's details:</p>
+                 <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px;">
+                    <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; width: 30%; color: #666;"><strong>Customer Name:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${name}</td></tr>
+                    <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Phone:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${phone}</td></tr>
+                    <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Email:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${email || 'N/A'}</td></tr>
+                    <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Event Date:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${weddingDate || 'N/A'}</td></tr>
+                    
+                    <tr><td style="padding: 8px; border-bottom: 1px solid #ddd; color: #666;"><strong>Message:</strong></td><td style="padding: 8px; border-bottom: 1px solid #ddd;">${message}</td></tr>
+                 </table>
+                 <p style="margin-top: 20px;">Please reach out to the customer directly at your earliest convenience to discuss their requirements.</p>`
+            );
+
+            emailPromises.push(
+                sendMail({ 
+                    to: vendorEmail, 
+                    subject: "New Customer Inquiry from KalyanaShobha", 
+                    html: vendorAlertContent 
+                })
+            );
+        }
+
+        // Send all emails in parallel
+        try {
+            await Promise.all(emailPromises);
+            console.log("Vendor lead emails sent successfully.");
+        } catch (emailError) {
+            console.error("Failed to send vendor lead emails:", emailError);
+            // We don't fail the request if emails fail, the lead is already saved in DB
+        }
+
+        // 6. Send Success Response to Frontend
         res.json({ 
             success: true, 
             message: "Request sent successfully! Our concierge team will contact you shortly." 
@@ -3552,6 +3594,11 @@ app.post("/api/user/vendor-lead", async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error while submitting lead" });
     }
 });
+
+
+
+
+
 
 // Admin: Update Vendor Lead Status
 app.put("/api/admin/vendor-leads/:id/status", verifyAdmin, async (req, res) => {
