@@ -4878,9 +4878,8 @@ app.post("/api/admin/settings/fees", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error updating settings" });
     }
 });
-
 // ====================================================================
-// USER: GET REGISTRATION FEE
+// USER: Get Registration Fee & Dynamic UPI ID
 // ====================================================================
 
 app.get("/api/user/registration-fee", verifyUser, async (req, res) => {
@@ -4888,23 +4887,22 @@ app.get("/api/user/registration-fee", verifyUser, async (req, res) => {
         const user = await User.findById(req.userId).select('gender isPaidMember');
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-        let settings = await Settings.findOne();
-        
-        // Fallback in case the admin hasn't set the fees yet
-        if (!settings) {
-            settings = { maleRegistrationFee: 0, femaleRegistrationFee: 0 };
-        }
+        const settings = await Settings.findOne();
 
-        // Determine the fee based on the user's gender
+        // Determine the fee based on the user's gender (safely checking if settings exist)
         const requiredFee = user.gender === 'Male' 
-            ? settings.maleRegistrationFee 
-            : settings.femaleRegistrationFee;
+            ? (settings?.maleRegistrationFee || 0) 
+            : (settings?.femaleRegistrationFee || 0);
+
+        // Get the dynamic UPI ID. If the admin hasn't set one yet, it will say "Not Set"
+        const finalUpiId = (settings && settings.upiId) ? settings.upiId : "Not Set";
 
         res.json({ 
             success: true, 
             fee: requiredFee, 
             gender: user.gender,
-            isAlreadyPaid: user.isPaidMember
+            isAlreadyPaid: user.isPaidMember,
+            upiId: finalUpiId // <-- Sends exactly what is in the database
         });
 
     } catch (error) {
@@ -4912,6 +4910,7 @@ app.get("/api/user/registration-fee", verifyUser, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error fetching fee" });
     }
 });
+
 
 // ====================================================================
 // NEW: PREMIUM MEMBERSHIP REQUEST LOGIC
