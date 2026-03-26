@@ -5320,6 +5320,65 @@ app.post("/api/admin/vendors/action", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error processing vendor action" });
     }
 });
+
+
+// ====================================================================
+// ADMIN: Update Global Settings (Fees & UPI ID)
+// ====================================================================
+app.put("/api/admin/settings", verifyAdmin, async (req, res) => {
+    try {
+        const { maleRegistrationFee, femaleRegistrationFee, upiId } = req.body;
+
+        // Fetch the first settings document or create one if it doesn't exist
+        let settings = await Settings.findOne();
+        if (!settings) {
+            settings = new Settings({});
+        }
+
+        if (maleRegistrationFee !== undefined) settings.maleRegistrationFee = maleRegistrationFee;
+        if (femaleRegistrationFee !== undefined) settings.femaleRegistrationFee = femaleRegistrationFee;
+        if (upiId !== undefined) settings.upiId = upiId;
+
+        settings.lastUpdatedBy = req.adminId; // Tracks which admin made the change
+        await settings.save();
+
+        res.json({ success: true, message: "Settings updated successfully", settings });
+    } catch (error) {
+        console.error("Update Settings Error:", error);
+        res.status(500).json({ success: false, message: "Server Error updating settings" });
+    }
+});
+
+
+// ====================================================================
+// USER: Get Registration Fee & Dynamic UPI ID
+// ====================================================================
+app.get("/api/user/registration-fee", verifyUser, async (req, res) => {
+    try {
+        const user = await User.findById(req.userId);
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        // Fetch settings, fallback to defaults if not found
+        const settings = await Settings.findOne() || { 
+            maleRegistrationFee: 0, 
+            femaleRegistrationFee: 0, 
+            upiId: '8897714968@axl' 
+        };
+
+        // Determine fee based on user gender
+        const fee = user.gender === 'Female' ? settings.femaleRegistrationFee : settings.maleRegistrationFee;
+
+        res.json({
+            success: true,
+            fee: fee,
+            upiId: settings.upiId // Send the dynamic UPI ID to the frontend
+        });
+    } catch (error) {
+        console.error("Fetch Fee Error:", error);
+        res.status(500).json({ success: false, message: "Server Error fetching fee" });
+    }
+});
+
                                                   
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
