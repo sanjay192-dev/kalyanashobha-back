@@ -5378,6 +5378,29 @@ app.get("/api/user/registration-fee", verifyUser, async (req, res) => {
     }
 });
 
+// ====================================================================
+// ADMIN: FETCH RESOLVED PREMIUM REQUESTS
+// ====================================================================
+
+app.get("/api/admin/premium-requests/resolved", verifyAdmin, async (req, res) => {
+    try {
+        // Query only for requests where the status is 'Resolved'
+        const resolvedRequests = await PremiumRequest.find({ status: 'Resolved' })
+            .populate('userId', 'firstName lastName uniqueId email mobileNumber gender city state')
+            .sort({ requestDate: -1 }); // Newest resolved requests first
+
+        res.json({ 
+            success: true, 
+            count: resolvedRequests.length, 
+            data: resolvedRequests 
+        });
+        
+    } catch (error) {
+        console.error("Fetch Resolved Premium Requests Error:", error);
+        res.status(500).json({ success: false, message: "Server Error fetching resolved requests" });
+    }
+});
+
                                                   
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
