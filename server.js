@@ -1496,7 +1496,8 @@ app.get("/api/admin/stats", verifyAdmin, async (req, res) => {
             Agent.countDocuments({}),
             Vendor.countDocuments({}),
             Interest.countDocuments({}),
-            Interest.countDocuments({ status: 'Accepted' })
+            // FIXED: Changed 'Accepted' to 'Finalized' to match your Schema
+            Interest.countDocuments({ status: 'Finalized' }) 
         ]);
 
         res.json({
@@ -1531,7 +1532,6 @@ app.get("/api/admin/stats", verifyAdmin, async (req, res) => {
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-
 
 
 
