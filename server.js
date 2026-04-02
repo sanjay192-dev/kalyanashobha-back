@@ -46,6 +46,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 let isConnected = false; // Track connection status
 
+
 const connectDB = async () => {
     // 1. If already connected, use existing connection
     if (mongoose.connection.readyState >= 1) {
@@ -55,15 +56,18 @@ const connectDB = async () => {
     // 2. If not, connect now
     try {
         await mongoose.connect(process.env.MONGO_URI, {
-            dbName: "kalyanashobha", // Optional: explicit DB name
-            serverSelectionTimeoutMS: 5000, // Timeout after 5s if DB is unreachable
-            socketTimeoutMS: 45000, // Close sockets after 45s
+            dbName: "kalyanashobha", 
+            serverSelectionTimeoutMS: 5000, 
+            socketTimeoutMS: 45000, 
+            
+            // --- ADD THESE TWO LINES ---
+            maxPoolSize: 10, // Restricts each Vercel instance to 10 connections instead of 100
+            minPoolSize: 1   // Keeps at least 1 connection warm per instance
         });
         isConnected = true;
         console.log("MongoDB Connected (New Connection)");
     } catch (error) {
         console.error("MongoDB Connection Failed:", error);
-        // We do NOT exit the process here, so the server stays alive for retry
     }
 };
 
