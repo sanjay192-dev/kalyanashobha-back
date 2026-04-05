@@ -5474,40 +5474,27 @@ app.get("/api/admin/agents/:agentId/premium-resolved", verifyAdmin, async (req, 
         res.status(500).json({ success: false, message: "Server Error fetching agent's premium users" });
     }
 });
-// ====================================================================
-// ADMIN: FETCH ALL USERS FOR A SPECIFIC AGENT
-// ====================================================================
 
 app.get("/api/admin/agents/:agentId/users", verifyAdmin, async (req, res) => {
     try {
         const { agentId } = req.params;
 
-        // 1. Verify if the agent exists (optional but recommended for clean error handling)
-        const agent = await Agent.findById(agentId).select('name agentCode');
-        if (!agent) {
-            return res.status(404).json({ success: false, message: "Agent not found" });
-        }
-
-        // 2. Fetch all users where referredByAgentId matches the requested agent
-        const agentUsers = await User.find({ referredByAgentId: agentId })
-            .select('-password -fcmToken -digitalSignature') // Exclude heavy/sensitive fields to optimize performance
-            .sort({ createdAt: -1 }); // Newest registrations first
+        // Fetch users matching the specific agent's ID
+        const users = await User.find({ referredByAgentId: agentId })
+            .select('-password -fcmToken') // Exclude sensitive fields
+            .sort({ createdAt: -1 });      // Newest first
 
         res.json({ 
             success: true, 
-            count: agentUsers.length,
-            agentName: agent.name,
-            agentCode: agent.agentCode,
-            data: agentUsers 
+            count: users.length, 
+            data: users 
         });
 
     } catch (error) {
-        console.error("Admin Fetch Agent Users Error:", error);
-        res.status(500).json({ success: false, message: "Server Error fetching agent's users" });
+        console.error("Fetch Users by Agent Error:", error);
+        res.status(500).json({ success: false, message: "Server Error fetching users." });
     }
 });
-
-
 
                                                   
 const PORT = process.env.PORT || 5000;
