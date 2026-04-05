@@ -5405,6 +5405,78 @@ app.get("/api/admin/premium-requests/resolved", verifyAdmin, async (req, res) =>
     }
 });
 
+// ====================================================================
+// AGENT: FETCH OWN RESOLVED PREMIUM USERS
+// ====================================================================
+
+app.get("/api/agent/premium-requests/resolved", verifyAgent, async (req, res) => {
+    try {
+        // 1. Get IDs of all users referred by this specific agent
+        const myUsers = await User.find({ referredByAgentId: req.agentId }).select('_id');
+        const userIds = myUsers.map(u => u._id);
+
+        if (userIds.length === 0) {
+            return res.json({ success: true, count: 0, data: [] });
+        }
+
+        // 2. Find Premium Requests for these users where status is 'Resolved'
+        const resolvedPremiumUsers = await PremiumRequest.find({
+            status: 'Resolved',
+            userId: { $in: userIds }
+        })
+        .populate('userId', 'firstName lastName uniqueId mobileNumber email gender city state')
+        .sort({ requestDate: -1 });
+
+        res.json({ 
+            success: true, 
+            count: resolvedPremiumUsers.length, 
+            data: resolvedPremiumUsers 
+        });
+
+    } catch (error) {
+        console.error("Agent Resolved Premium Users Error:", error);
+        res.status(500).json({ success: false, message: "Server Error fetching resolved premium users" });
+    }
+});
+
+// ====================================================================
+// ADMIN: FETCH RESOLVED PREMIUM USERS FOR A SPECIFIC AGENT
+// ====================================================================
+
+app.get("/api/admin/agents/:agentId/premium-resolved", verifyAdmin, async (req, res) => {
+    try {
+        const { agentId } = req.params;
+
+        // 1. Get IDs of all users referred by the targeted agent
+        const agentUsers = await User.find({ referredByAgentId: agentId }).select('_id');
+        const userIds = agentUsers.map(u => u._id);
+
+        if (userIds.length === 0) {
+            return res.json({ success: true, count: 0, data: [] });
+        }
+
+        // 2. Find Premium Requests for these users where status is 'Resolved'
+        const resolvedRequests = await PremiumRequest.find({
+            status: 'Resolved',
+            userId: { $in: userIds }
+        })
+        .populate('userId', 'firstName lastName uniqueId email mobileNumber gender city state')
+        .sort({ requestDate: -1 });
+
+        res.json({ 
+            success: true, 
+            count: resolvedRequests.length, 
+            data: resolvedRequests 
+        });
+
+    } catch (error) {
+        console.error("Admin Fetch Agent Premium Resolved Error:", error);
+        res.status(500).json({ success: false, message: "Server Error fetching agent's premium users" });
+    }
+});
+
+
+
                                                   
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
