@@ -706,8 +706,8 @@ const checkAndStageNewMasterData = async (userId, data) => {
         { category: 'State', value: data.state, parentValue: data.country }, // State belongs to Country
         { category: 'City', value: data.city, parentValue: data.state },     // City belongs to State
         { category: 'Education', value: data.highestQualification, parentValue: null },
-        { category: 'Designation', value: data.jobRole, parentValue: null },
-        { category: 'Gothra', value: data.gothra, parentValue: null }
+        { category: 'Designation', value: data.jobRole, parentValue: null }
+        // Gothra has been successfully removed from staging
     ];
 
     for (const item of standardCategories) {
@@ -784,6 +784,8 @@ const checkAndStageNewMasterData = async (userId, data) => {
     // --- 3. EXECUTE ALL AT ONCE ---
     await Promise.allSettled(checkPromises);
 };
+
+                
 
 
 // 3. REGISTER ROUTE (Updated to await the master data check)
